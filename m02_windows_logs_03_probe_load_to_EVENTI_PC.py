@@ -1,52 +1,58 @@
 #!/usr/bin/env python
 # m02_windows_logs_03_probe_load_to_EVENTI_PC.py
 #
-# Versione ripulita v2:
-#   - usa generate_windows_report.py per read_csv_events
-#   - considera solo i file principali del log (Security.csv / Security_events.csv)
-#   - IGNORA gli .evtx (già esportati in CSV dai tuoi tool)
-#   - NON fa parsing datetime: salva il timestamp grezzo come stringa in timestamp_utc
+# Probe Windows logs normalizzati in SAFENET e push in EVENTI_PC.
 #
-# Pipeline:
-#   C:\SAFENET\DataSetGlobal\windows_logs\<device_logical>\<tool_tag>\<run_id>\
-#       LOGS\<source_log>\Security.csv
-#     -> read_csv_events()
-#     -> insert in EVENTI_PC
+# v4:
+#   - lavora su:
+#       C:\SAFENET\DataSetGlobal\windows_logs\<device_label>\<tool_tag>\<run_id>\LOGS\<source_log>\
+#   - prende SOLO il CSV principale:
+#       <source_log>.csv      (es. Security.csv)
+#       o <source_log>_events.csv
+#   - legge il CSV con encoding "utf-8-sig" (fix BOM)
+#   - usa parse_event_time() di m02_windows_logs_01_log_dump.py
+#     ma se il parse fallisce, tiene il timestamp grezzo come stringa
+#   - inserisce in EVENTI_PC (timestamp_utc = stringa, device_id, source_log, event_code, description)
 #
 # Uso tipico:
 #
-#   python .\m02_windows_logs_03_probe_load_to_EVENTI_PC.py ^
+#   python.exe m02_windows_logs_03_probe_load_to_EVENTI_PC.py ^
 #       --dataset-root "C:\SAFENET\DataSetGlobal\windows_logs" ^
 #       --db "C:\SAFENET\DB\forensic.db" ^
 #       --source-log "Security" ^
 #       --device-label "PICCIRILLA_AleNew" ^
+#       --event-code 4624 ^
 #       --limit-per-run 20 ^
 #       --dry-run
 #
 
 import argparse
+import csv
 import sqlite3
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
-# Usiamo le funzioni del tuo generate_windows_report.py
+# ---------------------------------------------------------------------------
+# Import dalle utility del modulo M02_01 (il tuo log dumper Windows)
+# ---------------------------------------------------------------------------
+
 try:
-    from m02_windows_logs_01_log_dump import (
-        parse_event_time,   # non lo usiamo ora, ma lo teniamo importato se ti serve dopo
-        read_csv_events,
-    )
+    from m02_windows_logs_01_log_dump import parse_event_time
 except Exception as e:
     raise SystemExit(
-        "Impossibile importare parse_event_time/read_csv_events "
-        "da generate_windows_report.py.\n"
-        "Metti generate_windows_report.py nella stessa cartella di questo script.\n"
+        "Impossibile importare parse_event_time da m02_windows_logs_01_log_dump.py.\n"
+        "Assicurati che m02_windows_logs_01_log_dump.py sia nella stessa cartella di questo script.\n"
         f"Dettagli: {e}"
     )
 
 
+# ---------------------------------------------------------------------------
+# Helper DB
+# ---------------------------------------------------------------------------
+
 def load_device_map(conn: sqlite3.Connection) -> Dict[str, int]:
     """
-    Crea una mappa device_label -> device_id partendo da DEVICE_MASTER.
+    device_label -> device_id da DEVICE_MASTER.
     """
     cur = conn.cursor()
     cur.execute("SELECT device_id, device_label FROM DEVICE_MASTER")
@@ -57,31 +63,36 @@ def load_device_map(conn: sqlite3.Connection) -> Dict[str, int]:
     return mapping
 
 
-def iter_main_log_files(
+# ---------------------------------------------------------------------------
+# Iterazione sulle cartelle SAFENET
+# ---------------------------------------------------------------------------
+
+def iter_main_log_csv_files(
     dataset_root: Path,
-    device_label_filter: Optional[str],
     source_log: str,
-) -> Iterable[tuple]:
+    device_label_filter: Optional[str] = None,
+) -> Iterable[Tuple[str, str, str, Path]]:
     """
-    Scorre DataSetGlobal/windows_logs e cerca SOLO i file principali del log:
-      LOGS/<source_log>/Security.csv
-      LOGS/<source_log>/Security_events.csv
+    Scorre:
 
-    Ritorna tuple:
-        (device_logical, tool_tag, run_id, log_file_path)
+        <dataset_root>/<device_label>/<tool_tag>/<run_id>/LOGS/<source_log>/
+
+    e restituisce tuple:
+
+        (device_label, tool_tag, run_id, csv_path)
+
+    prendendo SOLO:
+        <source_log>.csv
+        oppure <source_log>_events.csv
     """
-    source_log_norm = source_log.strip()
-
-    MAIN_BASENAMES = {
-        source_log_norm,               # ad es. "Security"
-        f"{source_log_norm}_events",   # "Security_events"
-    }
+    src_norm = source_log.strip()
 
     for dev_dir in sorted(dataset_root.iterdir()):
         if not dev_dir.is_dir():
             continue
-        device_logical = dev_dir.name
-        if device_label_filter and device_logical != device_label_filter:
+
+        device_label = dev_dir.name
+        if device_label_filter and device_label != device_label_filter:
             continue
 
         for tool_dir in sorted(dev_dir.iterdir()):
@@ -93,59 +104,73 @@ def iter_main_log_files(
                 if not run_dir.is_dir():
                     continue
                 run_id = run_dir.name
-                logs_root = run_dir / "LOGS" / source_log_norm
-                if not logs_root.exists() or not logs_root.is_dir():
+
+                logs_root = run_dir / "LOGS" / src_norm
+                if not logs_root.is_dir():
                     continue
 
-                for log_file in sorted(logs_root.iterdir()):
-                    if not log_file.is_file():
-                        continue
+                main_csv = logs_root / f"{src_norm}.csv"
+                if main_csv.exists():
+                    yield device_label, tool_tag, run_id, main_csv
+                    continue
 
-                    stem = log_file.stem
-                    if stem not in MAIN_BASENAMES:
-                        # ignoriamo tutti i Microsoft-Windows-xxx ecc.
-                        continue
-
-                    yield device_logical, tool_tag, run_id, log_file
+                events_csv = logs_root / f"{src_norm}_events.csv"
+                if events_csv.exists():
+                    yield device_label, tool_tag, run_id, events_csv
+                    continue
 
 
-def event_rows_from_file(log_file: Path) -> List[dict]:
+# ---------------------------------------------------------------------------
+# Lettura CSV (fix BOM) + estrazione campi
+# ---------------------------------------------------------------------------
+
+def event_rows_from_file(csv_path: Path) -> List[dict]:
     """
-    Ritorna una lista di dict per gli eventi contenuti nel file.
-
-    v2: usiamo SOLO i CSV già generati.
-    Gli EVTX vengono ignorati.
+    Legge un CSV di eventi (UTF-8 con BOM) e restituisce una lista di dict.
+    Non fa filtri temporali qui; li gestiamo eventualmente a livello DB in seguito.
     """
-    suffix = log_file.suffix.lower()
+    if csv_path.suffix.lower() != ".csv":
+        print(f"  [INFO] Salto file non-CSV in questo probe: {csv_path}")
+        return []
 
-    if suffix == ".csv":
-        # read_csv_events expects a Path object, not a string.
-        rows = read_csv_events(log_file, start=None, end=None)
-        return rows
+    events: List[dict] = []
+    # 'utf-8-sig' mangia il BOM iniziale → header "TimeCreated" diventa corretto
+    with csv_path.open("r", encoding="utf-8-sig", errors="replace") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            events.append(row)
+    return events
 
-    print(f"  [INFO] Salto file non-CSV in questo probe: {log_file}")
-    return []
 
-
-def extract_basic_fields(row: dict) -> tuple:
+def extract_basic_fields(row: dict) -> Tuple[Optional[str], Optional[int], str]:
     """
-    Estrae i campi base per EVENTI_PC da una riga CSV generica.
-
-    v2:
-    - NON tenta di convertire a datetime/UTC.
-    - Usa il timestamp grezzo dal CSV come stringa.
+    Estrae:
+      - timestamp_utc_str (o stringa grezza se il parse fallisce)
+      - event_code (int, se possibile)
+      - description (Message/Description)
     """
-    # Timestamp grezzo dalla riga
+    # Timestamp: varianti possibili
     ts_value = (
         row.get("TimeCreated")
         or row.get("timeCreated")
+        or row.get("TimeCreatedUtc")
         or row.get("Date")
-        or row.get("Timestamp")
         or ""
     )
-    ts_utc_str = str(ts_value).strip().strip('"') if ts_value else None
+    ts_value = str(ts_value).strip()
 
-    # EventID / codice evento
+    ts_utc_str: Optional[str]
+    if ts_value:
+        dt_obj = parse_event_time(ts_value)
+        if dt_obj is not None:
+            ts_utc_str = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            # Parse fallito → usiamo la stringa grezza (locale)
+            ts_utc_str = ts_value
+    else:
+        ts_utc_str = None
+
+    # EventID
     ev_raw = (
         row.get("Id")
         or row.get("EventID")
@@ -158,22 +183,28 @@ def extract_basic_fields(row: dict) -> tuple:
     except Exception:
         event_code = None
 
-    # Messaggio / descrizione
+    # Descrizione
     desc = (
         row.get("Message")
         or row.get("Description")
         or ""
     )
-    desc = "" if desc is None else str(desc)
+    if desc is None:
+        desc = ""
+    desc = str(desc)
 
     return ts_utc_str, event_code, desc
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=(
-            "M02 Windows logs – probe: prende il log principale (es. Security) "
-            "da LOGS/<source_log> e inserisce eventi in EVENTI_PC."
+            "M02 Windows logs – probe: porta eventi da LOGS/<source_log> in EVENTI_PC "
+            "(timestamp grezzo + EventID + Message)."
         )
     )
     ap.add_argument(
@@ -184,38 +215,38 @@ def main() -> None:
     ap.add_argument(
         "--db",
         required=True,
-        help="Percorso al DB SQLite forense (es. C:\\SAFENET\\DB\\forensic.db).",
+        help="Percorso DB SQLite forense (es. C:\\SAFENET\\DB\\forensic.db).",
     )
     ap.add_argument(
         "--source-log",
-        default="Security",
-        help="Nome del log sorgente (Security, System, Application, PowerShell, AMSI). Default: Security.",
+        required=True,
+        help="Nome log sorgente (Security, System, Application, PowerShell, AMSI...).",
+    )
+    ap.add_argument(
+        "--device-label",
+        help="Filtra su uno specifico device_label (come in DEVICE_MASTER.device_label).",
     )
     ap.add_argument(
         "--event-code",
         type=int,
-        help="Filtra per un singolo EventID (es. 4624, 4625). Se omesso, inserisce tutti gli eventi.",
-    )
-    ap.add_argument(
-        "--device-label",
-        help="Limita ai log di un solo device_logical (es. PICCIRILLA_AleNew).",
+        help="Filtra su un EventID specifico (4624, 4625, 7045, ...).",
     )
     ap.add_argument(
         "--limit-per-run",
         type=int,
         default=100,
-        help="Massimo numero di eventi da inserire per ogni file/log (default: 100).",
+        help="Limite max eventi da inserire per ogni CSV (default 100).",
     )
     ap.add_argument(
         "--dry-run",
         action="store_true",
-        help="Non inserisce nel DB, mostra solo cosa farebbe.",
+        help="Se impostato, NON inserisce nel DB, ma stampa cosa farebbe.",
     )
 
     args = ap.parse_args()
 
-    dataset_root = Path(args.dataset_root).resolve()
-    if not dataset_root.exists() or not dataset_root.is_dir():
+    dataset_root = Path(args.dataset_root)
+    if not dataset_root.is_dir():
         raise SystemExit(f"dataset-root non valida: {dataset_root}")
 
     conn = sqlite3.connect(args.db)
@@ -234,27 +265,27 @@ def main() -> None:
     if args.device_label:
         print(f"[INFO] Filter device_label = {args.device_label}")
 
-    total_inserted = 0
     total_seen = 0
+    total_inserted = 0
 
-    for device_logical, tool_tag, run_id, log_file in iter_main_log_files(
+    for device_label, tool_tag, run_id, csv_file in iter_main_log_csv_files(
         dataset_root=dataset_root,
-        device_label_filter=args.device_label,
         source_log=args.source_log,
+        device_label_filter=args.device_label,
     ):
-        print(f"\n[FILE] {log_file}")
-        print(f"       device_logical = {device_logical}")
+        print(f"\n[FILE] {csv_file}")
+        print(f"       device_logical = {device_label}")
         print(f"       tool_tag       = {tool_tag}")
         print(f"       run_id         = {run_id}")
 
-        device_id = device_map.get(device_logical)
+        device_id = device_map.get(device_label)
         if device_id is None:
-            print(f"  [WARN] Nessun device_id in DEVICE_MASTER per '{device_logical}', salto questo file.")
+            print(f"  [WARN] Nessun device_id per '{device_label}', salto.")
             continue
 
-        rows = event_rows_from_file(log_file)
+        rows = event_rows_from_file(csv_file)
         if not rows:
-            print("  [INFO] Nessun evento dopo il parsing, salto.")
+            print("  [INFO] Nessun evento (o file vuoto/non supportato), salto.")
             continue
 
         inserted_for_file = 0
@@ -264,9 +295,11 @@ def main() -> None:
             ts_utc_str, event_code, desc = extract_basic_fields(row)
             total_seen += 1
 
+            # filtro per EventID
             if args.event_code is not None and event_code != args.event_code:
                 continue
 
+            # serve almeno qualcosa nel timestamp
             if ts_utc_str is None:
                 continue
 
