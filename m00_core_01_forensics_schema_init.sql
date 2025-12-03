@@ -1,4 +1,4 @@
--- forensics.sql
+-- m00_core_01_forensics_schema_init.sql
 --
 -- Schema iniziale DB forense (SQLite) per il progetto DB FORENSIC.
 -- Contiene le tabelle master, le tabelle eventi principali e le tabelle
@@ -6,7 +6,7 @@
 --
 -- Eseguire con qualcosa tipo:
 --   cd C:\SAFENET\DB
---   sqlite3 forensic.db ".read C:/SAFENET/Tools/forensics.sql"
+--   sqlite3 forensic.db ".read C:/SAFENET/Tools/m00_core_01_forensics_schema_init.sql"
 --
 -- Nota: tutte le CREATE usano IF NOT EXISTS per poter essere rilanciate in sicurezza.
 

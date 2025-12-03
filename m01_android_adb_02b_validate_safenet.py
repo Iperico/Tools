@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# android_logs_validate_safenet.py
+# m01_android_adb_02b_validate_safenet.py
 #
 # Breve descrizione:
 #   Valida che l'output riorganizzato di android_log_dump in SAFENET DataSetGlobal
@@ -18,7 +18,7 @@
 #     - Controlla presenza di META/acquisition_meta.json, se esiste confronta total_files.
 #
 # Esempio una riga (PowerShell 5):
-#   python .\android_logs_validate_safenet.py `
+#   python .\m01_android_adb_02b_validate_safenet.py `
 #       --android-logs-root "C:\SAFENET\android_logs" `
 #       --dataset-root "C:\SAFENET\DataSetGlobal\android_adb_logs" `
 #       --script-name "android_log_dump" `

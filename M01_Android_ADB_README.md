@@ -124,7 +124,7 @@ Per questa milestone:
 - viene creata se non esiste.
 - non viene ancora popolata.
 - funge da destinazione per uno script successivo
-  (`m01_android_adb_03_load_to_EVENTI_ANDROID.py`).
+  (`m01_android_adb_03_probe_load_to_EVENTI_ANDROID.py`).
 
 ---
 
@@ -182,7 +182,7 @@ Contenuto completo del file è in `m01_android_adb_01_init.sql` a fianco di ques
    In una milestone successiva si aggiungerà:
 
    ```bash
-   python m01_android_adb_03_load_to_EVENTI_ANDROID.py --target C:\SAFENET\DataSetGlobal\android_adb_logs
+   python m01_android_adb_03_probe_load_to_EVENTI_ANDROID.py --target C:\SAFENET\DataSetGlobal\android_adb_logs
    ```
 
    che leggerà `CORE_SYSTEM`, `CONNECTIVITY`, `APPS_PACKAGES` e `META`,

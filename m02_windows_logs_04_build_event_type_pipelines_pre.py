@@ -1,4 +1,4 @@
-# EvenTypePipelineBuilder.py
+# m02_windows_logs_04_build_event_type_pipelines_pre.py
 import argparse
 import json
 import sqlite3
