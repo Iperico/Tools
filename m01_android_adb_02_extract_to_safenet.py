@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# android_logs_to_safenet_auto.py
+# m01_android_adb_02_extract_to_safenet.py
 #
 # Breve descrizione:
 #   Riorganizza l'output di android_log_dump (cartelle android_logs/<brand>_<model>_<serial>_<YYYYMMDD_HHMMSS>)
@@ -11,7 +11,7 @@
 #   prova a leggere alcune getprop dal device connesso e le mette nel meta.
 #
 # Esempio una riga (PowerShell 5):
-#   python .\android_logs_to_safenet_auto.py `
+#   python .\m01_android_adb_02_extract_to_safenet.py `
 #       --android-logs-root "C:\SAFENET\android_logs" `
 #       --dataset-root "C:\SAFENET\DataSetGlobal\android_adb_logs" `
 #       --adb-info

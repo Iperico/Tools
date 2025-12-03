@@ -275,7 +275,7 @@ Ognuna con i suoi file:
 - `m0X_<source>_02b_validate_safenet.py`
 - `m0X_<source>_03_load_to_EVENTI_*.py`
 
-e comandi d’esempio in questo stesso `TUTORIAL.md`.
+e comandi d’esempio in questo stesso `00_TUTORIAL_DB_FORENSIC.md`.
 
 ---
 
