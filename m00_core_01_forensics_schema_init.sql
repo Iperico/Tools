@@ -273,3 +273,68 @@ CREATE INDEX IF NOT EXISTS idx_timeline_device_ts
 CREATE INDEX IF NOT EXISTS idx_timeline_account_ts
     ON TIMELINE_MASTER (account_id, timestamp_utc);
 
+
+-- ============================================================================
+-- 5) EVIDENCE INDEX E VISTE DI SUPPORTO
+-- ============================================================================
+
+-- 5.1 EVIDENCE_INDEX
+-- Indice di tutte le evidenze raccolte (host-centriche o user-centriche).
+-- Le raccolte precedenti possono valorizzare user_ref a NULL/vuoto.
+CREATE TABLE IF NOT EXISTS EVIDENCE_INDEX (
+    evidence_id        INTEGER PRIMARY KEY,
+    case_ref           TEXT NOT NULL,
+    host_name          TEXT NOT NULL,
+    user_ref           TEXT,             -- NULL se host-centrico
+    collected_on_utc   TIMESTAMP NOT NULL,
+    source_type        TEXT NOT NULL,
+    description        TEXT,
+    relative_path      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_evidence_case_host_user
+    ON EVIDENCE_INDEX (case_ref, host_name, user_ref);
+
+-- 5.2 Vista timeline arricchita con contesto di evidenza
+CREATE VIEW IF NOT EXISTS v_timeline_with_evidence AS
+SELECT
+    t.timeline_id,
+    t.timestamp_utc,
+    t.source_table   AS timeline_source_table,
+    t.source_event_id AS timeline_source_event_id,
+    t.device_id,
+    t.account_id,
+    t.ip_remoto,
+    t.evento_breve,
+    t.autore_probabile,
+    t.confidence,
+    t.sospetto_flag,
+    t.categoria_sospetto,
+    t.note,
+    d.device_label        AS host_name,
+    a.account_label       AS account_name,
+    e.case_ref,
+    e.user_ref,
+    e.source_type        AS evidence_source_type,
+    e.relative_path      AS evidence_relative_path
+FROM TIMELINE_MASTER t
+LEFT JOIN DEVICE_MASTER   d ON t.device_id  = d.device_id
+LEFT JOIN ACCOUNT_MASTER  a ON t.account_id = a.account_id
+LEFT JOIN EVIDENCE_INDEX  e
+    ON  e.host_name = d.device_label
+    AND (e.user_ref IS NULL OR e.user_ref = a.account_label);
+
+-- 5.3 Vista dedicata alle evidenze Edge user-centriche (per facile join ETL)
+CREATE VIEW IF NOT EXISTS v_edge_user_evidence AS
+SELECT
+    evidence_id,
+    case_ref,
+    host_name,
+    user_ref,
+    collected_on_utc,
+    source_type,
+    description,
+    relative_path
+FROM EVIDENCE_INDEX
+WHERE source_type LIKE 'Edge:%';
+
