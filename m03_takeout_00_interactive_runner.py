@@ -13,6 +13,7 @@ import os
 import sys
 import subprocess
 from pathlib import Path
+from datetime import datetime
 
 THIS_DIR = Path(__file__).resolve().parent
 
@@ -28,6 +29,8 @@ DEFAULTS = {
     "takeout_source": r"C:\Users\OMICRON\Desktop\Beb_Info_Fango\Takeout",
 }
 
+RUNTIME_DEFAULTS = DEFAULTS.copy()
+
 SOURCE_TYPES = [
     "PLAY_INSTALLS",
     "PLAY_ORDERS",
@@ -35,6 +38,31 @@ SOURCE_TYPES = [
     "PLAY_SUBSCRIPTIONS",
     "ACCESS_LOG",
 ]
+
+
+def path_status(path_str: str) -> str:
+    path = Path(path_str)
+    if path.exists():
+        return "OK"
+    return "ASSENTE"
+
+
+def latest_takeout_label(dataset_root: str) -> str | None:
+    root = Path(dataset_root)
+    if not root.is_dir():
+        return None
+
+    candidates = [p.name for p in root.iterdir()
+                  if p.is_dir() and p.name.startswith("takeout_")]
+    if not candidates:
+        return None
+
+    # Nomina standard: takeout_YYYYmmdd_HHMMSS → ordino alfabeticamente
+    return sorted(candidates)[-1]
+
+
+def get_default(key: str) -> str:
+    return RUNTIME_DEFAULTS.get(key, DEFAULTS.get(key, ""))
 
 
 def ask(prompt: str, default: str | None = None) -> str:
@@ -58,6 +86,64 @@ def run_subprocess(cmd: list[str]) -> int:
     return result.returncode
 
 
+def initialize_defaults():
+    print("\n=== CONFIGURAZIONE INIZIALE TAKEOUT ===\n")
+    fields = [
+        ("account_label", "ACCOUNT_MASTER.account_label predefinito"),
+        ("dataset_root_takeout", "Root DataSetGlobal/takeout predefinita"),
+        ("takeout_source", "Cartella TAKEOUT sorgente predefinita"),
+    ]
+
+    for key, prompt in fields:
+        current = get_default(key)
+        updated = ask(prompt, current)
+        RUNTIME_DEFAULTS[key] = updated
+
+    print("\n[INFO] Configurazione iniziale impostata.")
+    show_info()
+
+
+def show_info():
+    print("\n=== INFO CONFIGURAZIONE TAKEOUT ===\n")
+
+    print("Valori di default utilizzati:")
+    db_path = get_default("db")
+    dataset_root = get_default("dataset_root_takeout")
+    account_label = get_default("account_label")
+    source_takeout = get_default("takeout_source")
+
+    print(f"  DB forensic: {db_path}  [{path_status(db_path)}]")
+    print(f"  Dataset root: {dataset_root}  [{path_status(dataset_root)}]")
+    print(f"  Account label: {account_label}")
+    print(f"  Sorgente Takeout: {source_takeout}  [{path_status(source_takeout)}]")
+
+    latest = latest_takeout_label(dataset_root)
+    if latest:
+        latest_path = Path(dataset_root) / latest
+        timestamp = latest.replace("takeout_", "")
+        info_line = ""
+        try:
+            dt = datetime.strptime(timestamp, "%Y%m%d_%H%M%S")
+            info_line = f" (estrazione del {dt.strftime('%Y-%m-%d %H:%M:%S')})"
+        except ValueError:
+            info_line = ""
+        print(f"\nUltima estrazione rilevata: {latest}{info_line}")
+        print(f"  Percorso: {latest_path}")
+    else:
+        print("\nUltima estrazione rilevata: nessuna trovata")
+
+    dataset_root_path = Path(dataset_root)
+    if dataset_root_path.is_dir():
+        sub_dirs = sorted([p.name for p in dataset_root_path.iterdir() if p.is_dir()])
+        if sub_dirs:
+            print("\nCartelle takeout presenti:")
+            for name in sub_dirs[:10]:
+                print(f"  - {name}")
+            if len(sub_dirs) > 10:
+                print(f"  ... ({len(sub_dirs) - 10} ulteriori)")
+    print()
+
+
 def step_extract():
     print("\n=== STEP 1: ESTRAZIONE TAKEOUT → SAFENET ===\n")
 
@@ -66,13 +152,13 @@ def step_extract():
         return
 
     source = ask("Percorso cartella TAKEOUT (quella con 'Access Log Activity', 'Google Play Store', ...)",
-                 DEFAULTS["takeout_source"])
+                 get_default("takeout_source"))
     target = ask("Root DataSetGlobal/takeout",
-                 DEFAULTS["dataset_root_takeout"])
+                 get_default("dataset_root_takeout"))
     db = ask("Path DB forensic.db",
-             DEFAULTS["db"])
+             get_default("db"))
     account_label = ask("ACCOUNT_MASTER.account_label",
-                        DEFAULTS["account_label"])
+                        get_default("account_label"))
 
     from_date = ask("Filtro FROM date (YYYY-MM-DD) o vuoto per nessun filtro", "")
     to_date = ask("Filtro TO date (YYYY-MM-DD, esclusiva) o vuoto per nessun filtro", "")
@@ -105,9 +191,9 @@ def step_validate():
         return
 
     dataset_root = ask("Root DataSetGlobal/takeout",
-                       DEFAULTS["dataset_root_takeout"])
+                       get_default("dataset_root_takeout"))
     account_label = ask("ACCOUNT_MASTER.account_label",
-                        DEFAULTS["account_label"])
+                        get_default("account_label"))
     takeout_label = ask("takeout_label (es. takeout_20251116_224500, vuoto = ultimo)", "")
 
     cmd = [
@@ -151,11 +237,11 @@ def step_load():
         return
 
     dataset_root = ask("Root DataSetGlobal/takeout",
-                       DEFAULTS["dataset_root_takeout"])
+                       get_default("dataset_root_takeout"))
     db = ask("Path DB forensic.db",
-             DEFAULTS["db"])
+             get_default("db"))
     account_label = ask("ACCOUNT_MASTER.account_label",
-                        DEFAULTS["account_label"])
+                        get_default("account_label"))
     takeout_label = ask("takeout_label (es. takeout_20251116_224500, vuoto = ultimo)", "")
 
     print()
@@ -195,7 +281,8 @@ def main_menu():
         print("1) Estrazione Takeout → SAFENET")
         print("2) Validazione Takeout in SAFENET")
         print("3) Load EVENTI_ANDROID (probe)")
-        print("4) Esci")
+        print("4) Info dataset (percorsi e ultime estrazioni)")
+        print("5) Esci")
         choice = input("\nSeleziona un'operazione: ").strip()
 
         if choice == "1":
@@ -208,6 +295,9 @@ def main_menu():
             step_load()
             pause()
         elif choice == "4":
+            show_info()
+            pause()
+        elif choice == "5":
             print("Bye.")
             break
         else:
@@ -215,4 +305,8 @@ def main_menu():
 
 
 if __name__ == "__main__":
-    main_menu()
+    try:
+        initialize_defaults()
+        main_menu()
+    except KeyboardInterrupt:
+        print("\n\n[INFO] Interruzione utente rilevata. Uscita dal programma.")

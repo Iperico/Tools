@@ -52,9 +52,9 @@ if (-not [string]::IsNullOrWhiteSpace($daysInput)) {
 $now = Get-Date
 $collectedOnUtc = $now.ToUniversalTime().ToString("o")
 $startTime = $now.AddDays(-$daysBack)
-$host = $env:COMPUTERNAME
+$hostName = $env:COMPUTERNAME
 $timestamp = $now.ToString("yyyyMMdd_HHmmss")
-$caseFolderName = "{0}_{1}_{2}" -f $host, $caseRefFolderSafe, $timestamp
+$caseFolderName = "{0}_{1}_{2}" -f $hostName, $caseRefFolderSafe, $timestamp
 $caseFolder = Join-Path $OutputRoot $caseFolderName
 
 Write-Host "Cartella caso: $caseFolder"
@@ -72,7 +72,7 @@ function Add-Evidence {
 
     $script:evidenceIndex += [pscustomobject]@{
         CaseRef      = $caseRef
-        Host         = $host
+        Host         = $hostName
         UserRef      = $UserRef
         CollectedOn  = $collectedOnUtc
         SourceType   = $SourceType
