@@ -5,22 +5,22 @@ m04_Edge_Local_Forensic_dump.py
 Raccolta forense Edge-only per TUTTI gli utenti locali di una installazione Windows.
 
 Può lavorare:
-  - sulla macchina viva (windows-root = C:\)
-  - su un disco offline montato (es. windows-root = E:\)
+    - sulla macchina viva (windows-root = C\\)
+    - su un disco offline montato (es. windows-root = E\\)
 
-Per ogni utente (<windows-root>\Users\<user>):
-  - cerca Edge User Data: <user>\AppData\Local\Microsoft\Edge\User Data
+Per ogni utente (<windows-root>\\Users\\<user>):
+    - cerca Edge User Data: <user>\\AppData\\Local\\Microsoft\\Edge\\User Data
   - per ogni profilo (Default, Profile X, ...):
       - copia i principali file Edge
       - registra una riga in EvidenceIndex.csv
 
 Output:
 
-  <output-root>\<HOST>_<case_ref>_<YYYYMMDD_HHMMSS>\
+    <output-root>\\<HOST>_<case_ref>_<YYYYMMDD_HHMMSS>\\
       EvidenceIndex.csv
       Edge_Report.json
       Users\
-          <user>\Edge\<Profile>\Edge_History_<Profile>
+          <user>\\Edge\\<Profile>\\Edge_History_<Profile>
                                  Edge_Login_Data_<Profile>
                                  ...
 

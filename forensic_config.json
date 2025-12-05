@@ -1,0 +1,37 @@
+{
+    "globals": {
+        "workspace_folder": null,
+        "mysql_host": "localhost",
+        "mysql_port": 3306,
+        "mysql_user": "root",
+        "mysql_database": "forensic"
+    },
+    "milestones": {
+        "Edge": {
+            "name": "Edge",
+            "folder": null,
+            "steps": [
+                {
+                    "name": "Dump",
+                    "description": "Create forensic dump and normalize naming",
+                    "script_path": null
+                },
+                {
+                    "name": "Create Table",
+                    "description": "Add table to contain data in database",
+                    "script_path": null
+                },
+                {
+                    "name": "Load Data",
+                    "description": "Python script to fill the table",
+                    "script_path": null
+                },
+                {
+                    "name": "Validate",
+                    "description": "Script to validate data insertion",
+                    "script_path": null
+                }
+            ]
+        }
+    }
+}

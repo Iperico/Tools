@@ -23,10 +23,24 @@ class Step:
     name: str
     description: str
     script_path: Optional[str] = None
+<<<<<<< HEAD
 
     def display(self) -> str:
         script = self.script_path if self.script_path else "<not set>"
         return f"- {self.name}: {self.description} (script: {script})"
+=======
+    last_run_iteration: int = 0
+
+    def display(self, current_iteration: int = 0) -> str:
+        script = self.script_path if self.script_path else "<not set>"
+        run_info = (
+            f"last run in iteration {self.last_run_iteration}"
+            if self.last_run_iteration
+            else "never run"
+        )
+        marker = " ✅" if current_iteration and self.last_run_iteration == current_iteration else ""
+        return f"- {self.name}: {self.description} (script: {script}; {run_info}){marker}"
+>>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
 
 
 @dataclass
@@ -35,6 +49,7 @@ class Milestone:
 
     name: str
     folder: Optional[str] = None
+<<<<<<< HEAD
     steps: List[Step] = field(default_factory=list)
 
     @classmethod
@@ -42,6 +57,20 @@ class Milestone:
         return cls(
             name=name,
             folder=folder,
+=======
+    data_source: Optional[str] = None
+    steps: List[Step] = field(default_factory=list)
+    current_iteration: int = 0
+
+    @classmethod
+    def with_standard_steps(
+        cls, name: str, folder: Optional[str] = None, data_source: Optional[str] = None
+    ) -> "Milestone":
+        return cls(
+            name=name,
+            folder=folder,
+            data_source=data_source,
+>>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
             steps=[
                 Step(
                     name="Dump",
@@ -62,10 +91,44 @@ class Milestone:
             ],
         )
 
+<<<<<<< HEAD
     def display(self) -> str:
         folder = self.folder if self.folder else "<not set>"
         lines = [f"Milestone: {self.name} (folder: {folder})"]
         lines.extend(step.display() for step in self.steps)
+=======
+    def _iteration_started(self) -> bool:
+        return self.current_iteration > 0 and any(
+            step.last_run_iteration == self.current_iteration for step in self.steps
+        )
+
+    def iteration_completed(self) -> bool:
+        return self.current_iteration > 0 and all(
+            step.last_run_iteration == self.current_iteration for step in self.steps
+        )
+
+    def can_run_step(self, step_index: int) -> bool:
+        if step_index == 0:
+            return not self._iteration_started() or self.iteration_completed()
+        previous_step = self.steps[step_index - 1]
+        return previous_step.last_run_iteration == self.current_iteration
+
+    def mark_step_run(self, step_index: int) -> None:
+        if self.current_iteration == 0 or self.iteration_completed():
+            self.current_iteration += 1
+        self.steps[step_index].last_run_iteration = self.current_iteration
+
+    def display(self) -> str:
+        folder = self.folder if self.folder else "<not set>"
+        data_source = self.data_source if self.data_source else "<not set>"
+        iteration = self.current_iteration if self.current_iteration else "<never started>"
+        lines = [
+            f"Milestone: {self.name} (folder: {folder})",
+            f"Data to parse: {data_source}",
+            f"Current iteration: {iteration}",
+        ]
+        lines.extend(step.display(self.current_iteration) for step in self.steps)
+>>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
         return "\n".join(lines)
 
 
@@ -106,6 +169,7 @@ class ForensicConfig:
         data = json.loads(payload)
         globals_cfg = GlobalSettings(**data.get("globals", {}))
         milestones_data = data.get("milestones", {})
+<<<<<<< HEAD
         milestones = {
             name: Milestone(
                 name=milestone["name"],
@@ -114,6 +178,17 @@ class ForensicConfig:
             )
             for name, milestone in milestones_data.items()
         }
+=======
+        milestones = {}
+        for name, milestone in milestones_data.items():
+            milestones[name] = Milestone(
+                name=milestone["name"],
+                folder=milestone.get("folder"),
+                data_source=milestone.get("data_source"),
+                steps=[Step(**step) for step in milestone.get("steps", [])],
+                current_iteration=milestone.get("current_iteration", 0),
+            )
+>>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
         return cls(globals=globals_cfg, milestones=milestones)
 
     def save(self, path: str = CONFIG_FILE) -> None:
@@ -142,8 +217,14 @@ class ForensicUI:
             print("1) Modifica impostazioni globali")
             print("2) Aggiungi milestone (passi standard)")
             print("3) Modifica milestone esistente")
+<<<<<<< HEAD
             print("4) Mostra configurazione")
             print("5) Salva ed esci")
+=======
+            print("4) Esegui uno step")
+            print("5) Mostra configurazione")
+            print("6) Salva ed esci")
+>>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
             choice = input("Seleziona un'opzione: ").strip()
             if choice == "1":
                 self._edit_globals()
@@ -152,8 +233,15 @@ class ForensicUI:
             elif choice == "3":
                 self._edit_milestone()
             elif choice == "4":
+<<<<<<< HEAD
                 self._show_config()
             elif choice == "5":
+=======
+                self._run_step()
+            elif choice == "5":
+                self._show_config()
+            elif choice == "6":
+>>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
                 self._save_and_exit()
             else:
                 print("Scelta non valida. Riprova.\n")
@@ -188,7 +276,14 @@ class ForensicUI:
             print("Nome obbligatorio per creare una milestone.\n")
             return
         folder = input("Cartella associata (opzionale): ").strip() or None
+<<<<<<< HEAD
         milestone = Milestone.with_standard_steps(name=name, folder=folder)
+=======
+        data_source = input("Descrizione dati/DB da parsare (opzionale): ").strip() or None
+        milestone = Milestone.with_standard_steps(
+            name=name, folder=folder, data_source=data_source
+        )
+>>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
         self.config.milestones[name] = milestone
         print(f"Milestone '{name}' creata con i quattro step standard.\n")
 
@@ -218,16 +313,29 @@ class ForensicUI:
             print(milestone.display())
             print("1) Rinomina milestone")
             print("2) Imposta cartella")
+<<<<<<< HEAD
             print("3) Aggiorna script per uno step")
             print("4) Torna al menu principale")
+=======
+            print("3) Imposta origine dati")
+            print("4) Aggiorna script per uno step")
+            print("5) Torna al menu principale")
+>>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
             choice = input("Seleziona un'opzione: ").strip()
             if choice == "1":
                 self._rename_milestone(milestone)
             elif choice == "2":
                 self._set_milestone_folder(milestone)
             elif choice == "3":
+<<<<<<< HEAD
                 self._update_step_script(milestone)
             elif choice == "4":
+=======
+                self._set_milestone_data_source(milestone)
+            elif choice == "4":
+                self._update_step_script(milestone)
+            elif choice == "5":
+>>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
                 print()
                 return
             else:
@@ -252,6 +360,16 @@ class ForensicUI:
         milestone.folder = folder or None
         print("Cartella aggiornata.\n")
 
+<<<<<<< HEAD
+=======
+    def _set_milestone_data_source(self, milestone: Milestone) -> None:
+        data_source = input(
+            "Nuova origine dati/DB da parsare (vuoto per rimuovere): "
+        ).strip()
+        milestone.data_source = data_source or None
+        print("Origine dati aggiornata.\n")
+
+>>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
     def _update_step_script(self, milestone: Milestone) -> None:
         for idx, step in enumerate(milestone.steps, start=1):
             print(f"{idx}) {step.name}")
@@ -268,6 +386,40 @@ class ForensicUI:
         step.script_path = script or None
         print("Script aggiornato.\n")
 
+<<<<<<< HEAD
+=======
+    def _run_step(self) -> None:
+        milestone = self._select_milestone()
+        if not milestone:
+            return
+        for idx, step in enumerate(milestone.steps, start=1):
+            status = "completato" if step.last_run_iteration == milestone.current_iteration and milestone.current_iteration else "in sospeso"
+            print(f"{idx}) {step.name} ({status})")
+        choice = input("Seleziona lo step da eseguire: ").strip()
+        try:
+            index = int(choice) - 1
+            if index < 0:
+                raise ValueError
+        except ValueError:
+            print("Scelta non valida.\n")
+            return
+        if index >= len(milestone.steps):
+            print("Scelta non valida.\n")
+            return
+        if not milestone.can_run_step(index):
+            print(
+                "Sequenza non valida: completa lo step precedente o chiudi l'iterazione prima di ripartire.\n"
+            )
+            return
+        milestone.mark_step_run(index)
+        step = milestone.steps[index]
+        print(
+            "Step registrato come eseguito."
+            f" Iterazione attuale: {milestone.current_iteration}."
+            f" Script: {step.script_path or 'n/d'}.\n"
+        )
+
+>>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
     def _show_config(self) -> None:
         print("\nImpostazioni globali:")
         print(self.config.globals.display())
