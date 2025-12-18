@@ -1,162 +1,60 @@
-"""Interactive UI for configuring forensic milestones and steps.
+"""Visual milestone browser with a lightweight gradient UI.
 
-This script provides a simple text-based interface to manage:
-- Global folders and MySQL database settings.
-- Milestones with standard steps (dump, table creation, data load, validation).
-
-Configuration is stored in JSON next to the script by default.
+Shows milestones/steps from forensic_config.json with a gray circular gradient
+background and yellow text. This is a read-only viewer for now; it focuses on
+quick visibility of what exists and where.
 """
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass, asdict, field
+from pathlib import Path
 from typing import Dict, List, Optional
+import tkinter as tk
+from tkinter import messagebox, ttk
 
-CONFIG_FILE = "forensic_config.json"
+CONFIG_FILE = Path(__file__).with_name("forensic_config.json")
+
+# Palette (gray gradient background, yellow foreground)
+BG_DARK = "#0f0f0f"
+BG_BASE = "#1c1c1c"
+CARD_BG = "#262626"
+TEXT_MAIN = "#ffd54f"
+ACCENT = "#ffca28"
 
 
 @dataclass
 class Step:
-    """A single step inside a milestone."""
-
     name: str
     description: str
     script_path: Optional[str] = None
-<<<<<<< HEAD
 
     def display(self) -> str:
         script = self.script_path if self.script_path else "<not set>"
         return f"- {self.name}: {self.description} (script: {script})"
-=======
-    last_run_iteration: int = 0
-
-    def display(self, current_iteration: int = 0) -> str:
-        script = self.script_path if self.script_path else "<not set>"
-        run_info = (
-            f"last run in iteration {self.last_run_iteration}"
-            if self.last_run_iteration
-            else "never run"
-        )
-        marker = " ✅" if current_iteration and self.last_run_iteration == current_iteration else ""
-        return f"- {self.name}: {self.description} (script: {script}; {run_info}){marker}"
->>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
 
 
 @dataclass
 class Milestone:
-    """Milestone grouping the four canonical forensic steps."""
-
     name: str
     folder: Optional[str] = None
-<<<<<<< HEAD
     steps: List[Step] = field(default_factory=list)
-
-    @classmethod
-    def with_standard_steps(cls, name: str, folder: Optional[str] = None) -> "Milestone":
-        return cls(
-            name=name,
-            folder=folder,
-=======
-    data_source: Optional[str] = None
-    steps: List[Step] = field(default_factory=list)
-    current_iteration: int = 0
-
-    @classmethod
-    def with_standard_steps(
-        cls, name: str, folder: Optional[str] = None, data_source: Optional[str] = None
-    ) -> "Milestone":
-        return cls(
-            name=name,
-            folder=folder,
-            data_source=data_source,
->>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
-            steps=[
-                Step(
-                    name="Dump",
-                    description="Create forensic dump and normalize naming",
-                ),
-                Step(
-                    name="Create Table",
-                    description="Add table to contain data in database",
-                ),
-                Step(
-                    name="Load Data",
-                    description="Python script to fill the table",
-                ),
-                Step(
-                    name="Validate",
-                    description="Script to validate data insertion",
-                ),
-            ],
-        )
-
-<<<<<<< HEAD
-    def display(self) -> str:
-        folder = self.folder if self.folder else "<not set>"
-        lines = [f"Milestone: {self.name} (folder: {folder})"]
-        lines.extend(step.display() for step in self.steps)
-=======
-    def _iteration_started(self) -> bool:
-        return self.current_iteration > 0 and any(
-            step.last_run_iteration == self.current_iteration for step in self.steps
-        )
-
-    def iteration_completed(self) -> bool:
-        return self.current_iteration > 0 and all(
-            step.last_run_iteration == self.current_iteration for step in self.steps
-        )
-
-    def can_run_step(self, step_index: int) -> bool:
-        if step_index == 0:
-            return not self._iteration_started() or self.iteration_completed()
-        previous_step = self.steps[step_index - 1]
-        return previous_step.last_run_iteration == self.current_iteration
-
-    def mark_step_run(self, step_index: int) -> None:
-        if self.current_iteration == 0 or self.iteration_completed():
-            self.current_iteration += 1
-        self.steps[step_index].last_run_iteration = self.current_iteration
-
-    def display(self) -> str:
-        folder = self.folder if self.folder else "<not set>"
-        data_source = self.data_source if self.data_source else "<not set>"
-        iteration = self.current_iteration if self.current_iteration else "<never started>"
-        lines = [
-            f"Milestone: {self.name} (folder: {folder})",
-            f"Data to parse: {data_source}",
-            f"Current iteration: {iteration}",
-        ]
-        lines.extend(step.display(self.current_iteration) for step in self.steps)
->>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
-        return "\n".join(lines)
 
 
 @dataclass
 class GlobalSettings:
-    """Shared settings applied to every milestone."""
-
     workspace_folder: Optional[str] = None
     mysql_host: str = "localhost"
     mysql_port: int = 3306
     mysql_user: str = "root"
+    mysql_password: Optional[str] = None
     mysql_database: str = "forensic"
-
-    def display(self) -> str:
-        workspace = self.workspace_folder if self.workspace_folder else "<not set>"
-        return (
-            f"Workspace: {workspace}\n"
-            f"MySQL host: {self.mysql_host}\n"
-            f"MySQL port: {self.mysql_port}\n"
-            f"MySQL user: {self.mysql_user}\n"
-            f"MySQL database: {self.mysql_database}"
-        )
 
 
 @dataclass
 class ForensicConfig:
-    """Container for global settings and milestones."""
-
     globals: GlobalSettings = field(default_factory=GlobalSettings)
     milestones: Dict[str, Milestone] = field(default_factory=dict)
 
@@ -169,7 +67,6 @@ class ForensicConfig:
         data = json.loads(payload)
         globals_cfg = GlobalSettings(**data.get("globals", {}))
         milestones_data = data.get("milestones", {})
-<<<<<<< HEAD
         milestones = {
             name: Milestone(
                 name=milestone["name"],
@@ -178,268 +75,358 @@ class ForensicConfig:
             )
             for name, milestone in milestones_data.items()
         }
-=======
-        milestones = {}
-        for name, milestone in milestones_data.items():
-            milestones[name] = Milestone(
-                name=milestone["name"],
-                folder=milestone.get("folder"),
-                data_source=milestone.get("data_source"),
-                steps=[Step(**step) for step in milestone.get("steps", [])],
-                current_iteration=milestone.get("current_iteration", 0),
-            )
->>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
         return cls(globals=globals_cfg, milestones=milestones)
 
-    def save(self, path: str = CONFIG_FILE) -> None:
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(self.to_json())
-
     @classmethod
-    def load(cls, path: str = CONFIG_FILE) -> "ForensicConfig":
-        if not os.path.exists(path):
+    def load(cls, path: Path = CONFIG_FILE) -> "ForensicConfig":
+        if not path.exists():
             return cls()
-        with open(path, "r", encoding="utf-8") as fh:
+        with path.open("r", encoding="utf-8") as fh:
             return cls.from_json(fh.read())
 
+    def save(self, path: Path = CONFIG_FILE) -> None:
+        with path.open("w", encoding="utf-8") as fh:
+            fh.write(self.to_json())
 
-class ForensicUI:
-    """Text-based UI to configure milestones and global settings."""
 
-    def __init__(self, config_path: str = CONFIG_FILE) -> None:
-        self.config_path = config_path
-        self.config = ForensicConfig.load(config_path)
-
-    def run(self) -> None:
-        print("Forensic milestone configurator\n")
-        while True:
-            print("Main menu")
-            print("1) Modifica impostazioni globali")
-            print("2) Aggiungi milestone (passi standard)")
-            print("3) Modifica milestone esistente")
-<<<<<<< HEAD
-            print("4) Mostra configurazione")
-            print("5) Salva ed esci")
-=======
-            print("4) Esegui uno step")
-            print("5) Mostra configurazione")
-            print("6) Salva ed esci")
->>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
-            choice = input("Seleziona un'opzione: ").strip()
-            if choice == "1":
-                self._edit_globals()
-            elif choice == "2":
-                self._add_milestone()
-            elif choice == "3":
-                self._edit_milestone()
-            elif choice == "4":
-<<<<<<< HEAD
-                self._show_config()
-            elif choice == "5":
-=======
-                self._run_step()
-            elif choice == "5":
-                self._show_config()
-            elif choice == "6":
->>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
-                self._save_and_exit()
-            else:
-                print("Scelta non valida. Riprova.\n")
-
-    def _edit_globals(self) -> None:
-        globals_cfg = self.config.globals
-        print("\nImpostazioni globali attuali:")
-        print(globals_cfg.display())
-        workspace = input("Cartella workspace (vuoto per lasciare invariato): ").strip()
-        if workspace:
-            globals_cfg.workspace_folder = workspace
-        host = input("MySQL host (default localhost): ").strip()
-        if host:
-            globals_cfg.mysql_host = host
-        port_str = input("MySQL port (default 3306): ").strip()
-        if port_str:
-            try:
-                globals_cfg.mysql_port = int(port_str)
-            except ValueError:
-                print("Porta non valida, valore ignorato.")
-        user = input("MySQL user (default root): ").strip()
-        if user:
-            globals_cfg.mysql_user = user
-        database = input("MySQL database (default forensic): ").strip()
-        if database:
-            globals_cfg.mysql_database = database
-        print("Impostazioni globali aggiornate.\n")
-
-    def _add_milestone(self) -> None:
-        name = input("\nNome della milestone: ").strip()
-        if not name:
-            print("Nome obbligatorio per creare una milestone.\n")
-            return
-        folder = input("Cartella associata (opzionale): ").strip() or None
-<<<<<<< HEAD
-        milestone = Milestone.with_standard_steps(name=name, folder=folder)
-=======
-        data_source = input("Descrizione dati/DB da parsare (opzionale): ").strip() or None
-        milestone = Milestone.with_standard_steps(
-            name=name, folder=folder, data_source=data_source
+def draw_radial_gradient(canvas: tk.Canvas, width: int, height: int) -> None:
+    """Draw a soft circular gray gradient on the canvas."""
+    canvas.delete("gradient")
+    radius = max(width, height) * 0.75
+    cx, cy = width / 2, height / 2
+    steps = 30
+    for i in range(steps):
+        ratio = i / steps
+        shade = int(15 + (40 * ratio))
+        color = f"#{shade:02x}{shade:02x}{shade:02x}"
+        r = radius * (1 - ratio * 0.95)
+        canvas.create_oval(
+            cx - r,
+            cy - r,
+            cx + r,
+            cy + r,
+            fill=color,
+            outline="",
+            tags="gradient",
         )
->>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
-        self.config.milestones[name] = milestone
-        print(f"Milestone '{name}' creata con i quattro step standard.\n")
 
-    def _select_milestone(self) -> Optional[Milestone]:
-        if not self.config.milestones:
-            print("\nNon ci sono milestone da modificare.\n")
-            return None
-        names = list(self.config.milestones)
-        for idx, name in enumerate(names, start=1):
-            print(f"{idx}) {name}")
-        choice = input("Seleziona una milestone: ").strip()
-        try:
-            index = int(choice) - 1
-            if index < 0:
-                raise ValueError
-            return self.config.milestones[names[index]]
-        except (ValueError, IndexError):
-            print("Scelta non valida.\n")
-            return None
 
-    def _edit_milestone(self) -> None:
-        milestone = self._select_milestone()
+class ForensicApp:
+    def __init__(self, root: tk.Tk) -> None:
+        self.root = root
+        self.config = ForensicConfig.load()
+        self.root.title("Forensic Milestones")
+        self.root.geometry("1200x720")
+        self.root.configure(bg=BG_BASE)
+        self.root.attributes("-alpha", 0.94)
+
+        self.bg_canvas = tk.Canvas(
+            self.root,
+            highlightthickness=0,
+            bd=0,
+            bg=BG_DARK,
+        )
+        self.bg_canvas.pack(fill="both", expand=True)
+        self.bg_canvas.bind("<Configure>", self._on_resize)
+
+        self.container = tk.Frame(self.bg_canvas, bg=BG_BASE, highlightthickness=0, bd=0)
+        self.bg_canvas.create_window(0, 0, anchor="nw", window=self.container, tags="content")
+
+        self._build_header()
+        self._build_layout()
+        self._populate_globals()
+        self._populate_milestones()
+
+    def _on_resize(self, event) -> None:
+        draw_radial_gradient(self.bg_canvas, event.width, event.height)
+        # Keep content pinned to canvas
+        self.bg_canvas.coords("content", 0, 0)
+        self.bg_canvas.itemconfig("content", width=event.width, height=event.height)
+
+    def _build_header(self) -> None:
+        header = tk.Frame(self.container, bg=BG_BASE, pady=10)
+        header.pack(fill="x")
+        title = tk.Label(
+            header,
+            text="Forensic Bebboloidi Investigations - FangoShit",
+            fg=TEXT_MAIN,
+            bg=BG_BASE,
+            font=("Segoe UI", 20, "bold"),
+        )
+        title.pack(side="left", padx=16)
+        settings_btn = tk.Button(
+            header,
+            text="Settings",
+            command=self._open_settings,
+            fg=BG_DARK,
+            bg=TEXT_MAIN,
+            activebackground=ACCENT,
+            activeforeground=BG_DARK,
+            relief="flat",
+            padx=12,
+            pady=6,
+        )
+        settings_btn.pack(side="right", padx=4)
+        refresh = tk.Button(
+            header,
+            text="Refresh",
+            command=self._refresh,
+            fg=BG_DARK,
+            bg=TEXT_MAIN,
+            activebackground=ACCENT,
+            activeforeground=BG_DARK,
+            relief="flat",
+            padx=12,
+            pady=6,
+        )
+        refresh.pack(side="right", padx=4)
+        quit_btn = tk.Button(
+            header,
+            text="Quit",
+            command=self.root.destroy,
+            fg=BG_DARK,
+            bg=TEXT_MAIN,
+            activebackground=ACCENT,
+            activeforeground=BG_DARK,
+            relief="flat",
+            padx=10,
+            pady=6,
+        )
+        quit_btn.pack(side="right", padx=4)
+
+    def _build_layout(self) -> None:
+        main = tk.Frame(self.container, bg=BG_BASE, padx=16, pady=10)
+        main.pack(fill="both", expand=True)
+
+        # Left: milestones list
+        left = tk.Frame(main, bg=BG_BASE, padx=8)
+        left.pack(side="left", fill="y")
+        lbl = tk.Label(left, text="Milestones", fg=TEXT_MAIN, bg=BG_BASE, font=("Segoe UI", 12, "bold"))
+        lbl.pack(anchor="w")
+        self.milestone_list = tk.Listbox(
+            left,
+            bg=CARD_BG,
+            fg=TEXT_MAIN,
+            selectbackground=ACCENT,
+            selectforeground=BG_DARK,
+            font=("Consolas", 11),
+            height=20,
+            activestyle="none",
+        )
+        self.milestone_list.pack(fill="y", expand=True, pady=6)
+        self.milestone_list.bind("<<ListboxSelect>>", self._on_select_milestone)
+
+        # Right: details
+        right = tk.Frame(main, bg=BG_BASE, padx=8)
+        right.pack(side="left", fill="both", expand=True)
+
+        globals_card = tk.Frame(right, bg=CARD_BG, padx=14, pady=10)
+        globals_card.pack(fill="x", pady=(0, 10))
+        tk.Label(
+            globals_card,
+            text="Global Settings",
+            fg=TEXT_MAIN,
+            bg=CARD_BG,
+            font=("Segoe UI", 11, "bold"),
+        ).pack(anchor="w")
+        self.global_text = tk.Label(
+            globals_card,
+            text="",
+            fg=TEXT_MAIN,
+            bg=CARD_BG,
+            justify="left",
+            font=("Consolas", 10),
+        )
+        self.global_text.pack(anchor="w", pady=(4, 0))
+
+        steps_card = tk.Frame(right, bg=CARD_BG, padx=14, pady=10)
+        steps_card.pack(fill="both", expand=True)
+        tk.Label(
+            steps_card,
+            text="Steps",
+            fg=TEXT_MAIN,
+            bg=CARD_BG,
+            font=("Segoe UI", 11, "bold"),
+        ).pack(anchor="w")
+        self.steps_tree = ttk.Treeview(
+            steps_card,
+            columns=("description", "script"),
+            show="headings",
+            selectmode="browse",
+            height=12,
+        )
+        self.steps_tree.heading("description", text="Description")
+        self.steps_tree.heading("script", text="Script")
+        self.steps_tree.column("description", width=260, anchor="w")
+        self.steps_tree.column("script", width=320, anchor="w")
+        self.steps_tree.pack(fill="both", expand=True, pady=(6, 0))
+        style = ttk.Style()
+        style.theme_use("default")
+        style.configure(
+            "Treeview",
+            background=CARD_BG,
+            foreground=TEXT_MAIN,
+            fieldbackground=CARD_BG,
+            rowheight=26,
+            bordercolor=CARD_BG,
+        )
+        style.configure("Treeview.Heading", background=BG_DARK, foreground=TEXT_MAIN)
+        style.map("Treeview", background=[("selected", ACCENT)], foreground=[("selected", BG_DARK)])
+
+    def _populate_globals(self) -> None:
+        g = self.config.globals
+        workspace = g.workspace_folder or "<not set>"
+        info = (
+            f"Workspace: {workspace}\n"
+            f"MySQL host: {g.mysql_host}:{g.mysql_port}\n"
+            f"User/DB: {g.mysql_user} / {g.mysql_database}"
+        )
+        self.global_text.config(text=info)
+
+    def _populate_milestones(self) -> None:
+        self.milestone_list.delete(0, tk.END)
+        for name in sorted(self.config.milestones):
+            self.milestone_list.insert(tk.END, name)
+        if self.config.milestones:
+            self.milestone_list.selection_set(0)
+            self._on_select_milestone()
+
+    def _on_select_milestone(self, event=None) -> None:
+        self.steps_tree.delete(*self.steps_tree.get_children())
+        selection = self.milestone_list.curselection()
+        if not selection:
+            return
+        name = self.milestone_list.get(selection[0])
+        milestone = self.config.milestones.get(name)
         if not milestone:
             return
-        while True:
-            print("\nModifica milestone")
-            print(milestone.display())
-            print("1) Rinomina milestone")
-            print("2) Imposta cartella")
-<<<<<<< HEAD
-            print("3) Aggiorna script per uno step")
-            print("4) Torna al menu principale")
-=======
-            print("3) Imposta origine dati")
-            print("4) Aggiorna script per uno step")
-            print("5) Torna al menu principale")
->>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
-            choice = input("Seleziona un'opzione: ").strip()
-            if choice == "1":
-                self._rename_milestone(milestone)
-            elif choice == "2":
-                self._set_milestone_folder(milestone)
-            elif choice == "3":
-<<<<<<< HEAD
-                self._update_step_script(milestone)
-            elif choice == "4":
-=======
-                self._set_milestone_data_source(milestone)
-            elif choice == "4":
-                self._update_step_script(milestone)
-            elif choice == "5":
->>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
-                print()
-                return
-            else:
-                print("Scelta non valida.\n")
+        for step in milestone.steps:
+            script = step.script_path or "<not set>"
+            self.steps_tree.insert("", tk.END, values=(step.description, script))
 
-    def _rename_milestone(self, milestone: Milestone) -> None:
-        new_name = input("Nuovo nome: ").strip()
-        if not new_name:
-            print("Nome non modificato.\n")
-            return
-        if new_name in self.config.milestones and new_name != milestone.name:
-            print("Esiste già una milestone con questo nome.\n")
-            return
-        if new_name != milestone.name:
-            self.config.milestones.pop(milestone.name)
-            milestone.name = new_name
-            self.config.milestones[new_name] = milestone
-        print("Milestone rinominata.\n")
-
-    def _set_milestone_folder(self, milestone: Milestone) -> None:
-        folder = input("Nuova cartella (vuoto per rimuovere): ").strip()
-        milestone.folder = folder or None
-        print("Cartella aggiornata.\n")
-
-<<<<<<< HEAD
-=======
-    def _set_milestone_data_source(self, milestone: Milestone) -> None:
-        data_source = input(
-            "Nuova origine dati/DB da parsare (vuoto per rimuovere): "
-        ).strip()
-        milestone.data_source = data_source or None
-        print("Origine dati aggiornata.\n")
-
->>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
-    def _update_step_script(self, milestone: Milestone) -> None:
-        for idx, step in enumerate(milestone.steps, start=1):
-            print(f"{idx}) {step.name}")
-        choice = input("Seleziona uno step: ").strip()
+    def _refresh(self) -> None:
         try:
-            index = int(choice) - 1
-            if index < 0:
-                raise ValueError
-            step = milestone.steps[index]
-        except (ValueError, IndexError):
-            print("Scelta non valida.\n")
-            return
-        script = input("Percorso script (vuoto per rimuovere): ").strip()
-        step.script_path = script or None
-        print("Script aggiornato.\n")
+            self.config = ForensicConfig.load()
+            self._populate_globals()
+            self._populate_milestones()
+            messagebox.showinfo("Refresh", "Configuration reloaded.")
+        except Exception as exc:
+            messagebox.showerror("Error", f"Could not reload config:\n{exc}")
 
-<<<<<<< HEAD
-=======
-    def _run_step(self) -> None:
-        milestone = self._select_milestone()
-        if not milestone:
-            return
-        for idx, step in enumerate(milestone.steps, start=1):
-            status = "completato" if step.last_run_iteration == milestone.current_iteration and milestone.current_iteration else "in sospeso"
-            print(f"{idx}) {step.name} ({status})")
-        choice = input("Seleziona lo step da eseguire: ").strip()
-        try:
-            index = int(choice) - 1
-            if index < 0:
-                raise ValueError
-        except ValueError:
-            print("Scelta non valida.\n")
-            return
-        if index >= len(milestone.steps):
-            print("Scelta non valida.\n")
-            return
-        if not milestone.can_run_step(index):
-            print(
-                "Sequenza non valida: completa lo step precedente o chiudi l'iterazione prima di ripartire.\n"
+    def _open_settings(self) -> None:
+        """Modal window to edit project settings (DB + dataset folders)."""
+        win = tk.Toplevel(self.root)
+        win.title("Settings")
+        win.configure(bg=BG_BASE)
+        win.geometry("560x520")
+        win.grab_set()
+
+        section_title = lambda text: tk.Label(
+            win, text=text, fg=TEXT_MAIN, bg=BG_BASE, font=("Segoe UI", 12, "bold")
+        )
+
+        def add_field(parent, label, value):
+            row = tk.Frame(parent, bg=BG_BASE, pady=4)
+            row.pack(fill="x")
+            tk.Label(row, text=label, fg=TEXT_MAIN, bg=BG_BASE, width=18, anchor="w").pack(side="left")
+            entry = tk.Entry(
+                row,
+                fg=TEXT_MAIN,
+                bg=CARD_BG,
+                insertbackground=TEXT_MAIN,
+                relief="flat",
+                width=46,
             )
-            return
-        milestone.mark_step_run(index)
-        step = milestone.steps[index]
-        print(
-            "Step registrato come eseguito."
-            f" Iterazione attuale: {milestone.current_iteration}."
-            f" Script: {step.script_path or 'n/d'}.\n"
+            entry.insert(0, value or "")
+            entry.pack(side="left", fill="x", expand=True, padx=(6, 0))
+            return entry
+
+        # Globals
+        section_title("SQL DB Server / Globals").pack(anchor="w", pady=(10, 2))
+        globals_frame = tk.Frame(win, bg=BG_BASE)
+        globals_frame.pack(fill="x", padx=6)
+        g = self.config.globals
+        ent_workspace = add_field(globals_frame, "Workspace folder", g.workspace_folder or "")
+        ent_host = add_field(globals_frame, "MySQL host", g.mysql_host)
+        ent_port = add_field(globals_frame, "MySQL port", str(g.mysql_port))
+        ent_user = add_field(globals_frame, "MySQL user", g.mysql_user)
+        ent_password = add_field(globals_frame, "MySQL password", g.mysql_password or "")
+        ent_db = add_field(globals_frame, "Database", g.mysql_database)
+        ent_password.config(show="*")
+
+        # Milestone folders
+        section_title("Dataset folders per milestone").pack(anchor="w", pady=(16, 2))
+        ms_frame = tk.Frame(win, bg=BG_BASE)
+        ms_frame.pack(fill="x", padx=6)
+        milestone_entries: Dict[str, tk.Entry] = {}
+        for name, milestone in sorted(self.config.milestones.items()):
+            milestone_entries[name] = add_field(ms_frame, name, milestone.folder or "")
+
+        btn_row = tk.Frame(win, bg=BG_BASE, pady=14)
+        btn_row.pack(fill="x")
+
+        def on_save():
+            # Update globals
+            g.workspace_folder = ent_workspace.get().strip() or None
+            g.mysql_host = ent_host.get().strip() or g.mysql_host
+            g.mysql_user = ent_user.get().strip() or g.mysql_user
+            g.mysql_password = ent_password.get().strip() or None
+            g.mysql_database = ent_db.get().strip() or g.mysql_database
+            port_val = ent_port.get().strip()
+            try:
+                g.mysql_port = int(port_val) if port_val else g.mysql_port
+            except ValueError:
+                messagebox.showerror("Invalid port", "MySQL port must be a number.")
+                return
+
+            # Update milestone folders
+            for name, entry in milestone_entries.items():
+                val = entry.get().strip()
+                if name in self.config.milestones:
+                    self.config.milestones[name].folder = val or None
+
+            try:
+                self.config.save()
+                self._populate_globals()
+                self._populate_milestones()
+                messagebox.showinfo("Saved", "Settings updated and saved.")
+                win.destroy()
+            except Exception as exc:
+                messagebox.showerror("Error", f"Could not save settings:\n{exc}")
+
+        save_btn = tk.Button(
+            btn_row,
+            text="Save",
+            command=on_save,
+            fg=BG_DARK,
+            bg=TEXT_MAIN,
+            activebackground=ACCENT,
+            activeforeground=BG_DARK,
+            relief="flat",
+            padx=14,
+            pady=6,
         )
+        save_btn.pack(side="right", padx=6)
 
->>>>>>> 4807cea7e81964f4ea3f58bad542d25a3bc5cd10
-    def _show_config(self) -> None:
-        print("\nImpostazioni globali:")
-        print(self.config.globals.display())
-        if not self.config.milestones:
-            print("\nNessuna milestone configurata.\n")
-            return
-        print("\nMilestone configurate:")
-        for milestone in self.config.milestones.values():
-            print(milestone.display())
-            print()
-
-    def _save_and_exit(self) -> None:
-        self.config.save(self.config_path)
-        print(f"Configurazione salvata in {self.config_path}.")
-        raise SystemExit
+        cancel_btn = tk.Button(
+            btn_row,
+            text="Cancel",
+            command=win.destroy,
+            fg=TEXT_MAIN,
+            bg=BG_DARK,
+            activebackground=ACCENT,
+            activeforeground=BG_DARK,
+            relief="flat",
+            padx=12,
+            pady=6,
+        )
+        cancel_btn.pack(side="right", padx=6)
 
 
 def main() -> None:
-    ui = ForensicUI()
-    ui.run()
+    root = tk.Tk()
+    app = ForensicApp(root)
+    root.mainloop()
 
 
 if __name__ == "__main__":

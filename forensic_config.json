@@ -1,35 +1,114 @@
 {
     "globals": {
         "workspace_folder": null,
-        "mysql_host": "localhost",
+        "mysql_host": "127.0.0.1",
         "mysql_port": 3306,
-        "mysql_user": "root",
+        "mysql_user": "forensic",
+        "mysql_password": "forensic",
         "mysql_database": "forensic"
     },
     "milestones": {
-        "Edge": {
-            "name": "Edge",
-            "folder": null,
+        "Android ADB": {
+            "name": "Android ADB",
+            "folder": "C:\\SAFENET\\DataSetGlobal\\android_adb_logs",
             "steps": [
                 {
                     "name": "Dump",
                     "description": "Create forensic dump and normalize naming",
-                    "script_path": null
+                    "script_path": "m01_android_adb_00_capture_log_dump_0_2.py"
                 },
                 {
                     "name": "Create Table",
                     "description": "Add table to contain data in database",
-                    "script_path": null
+                    "script_path": "m01_android_adb_01_init.sql"
                 },
                 {
                     "name": "Load Data",
                     "description": "Python script to fill the table",
-                    "script_path": null
+                    "script_path": "m01_android_adb_03_probe_load_to_EVENTI_ANDROID.py"
+                },
+                {
+                    "name": "Validate",
+                    "description": "Script to validate data insertion",
+                    "script_path": "m01_android_adb_04_validate_coherence.py"
+                }
+            ]
+        },
+        "Windows Logs": {
+            "name": "Windows Logs",
+            "folder": "C:\\SAFENET\\DataSetGlobal\\windows_logs",
+            "steps": [
+                {
+                    "name": "Dump",
+                    "description": "Create forensic dump and normalize naming",
+                    "script_path": "m02_windows_logs_01_log_dump.py"
+                },
+                {
+                    "name": "Create Table",
+                    "description": "Add table to contain data in database",
+                    "script_path": "m02_windows_logs_04_build_event_type_pipelines_pre.py"
+                },
+                {
+                    "name": "Load Data",
+                    "description": "Python script to fill the table",
+                    "script_path": "m02_windows_logs_03_probe_load_to_EVENTI_PC.py"
                 },
                 {
                     "name": "Validate",
                     "description": "Script to validate data insertion",
                     "script_path": null
+                }
+            ]
+        },
+        "Takeout": {
+            "name": "Takeout",
+            "folder": "C:\\SAFENET\\DataSetGlobal\\takeout",
+            "steps": [
+                {
+                    "name": "Dump",
+                    "description": "Create forensic dump and normalize naming",
+                    "script_path": "m03_takeout_02_extract_to_safenet.py"
+                },
+                {
+                    "name": "Create Table",
+                    "description": "Add table to contain data in database",
+                    "script_path": "m03_takeout_01_init.sql"
+                },
+                {
+                    "name": "Load Data",
+                    "description": "Python script to fill the table",
+                    "script_path": "m03_takeout_03_probe_load_to_EVENTI_ANDROID.py"
+                },
+                {
+                    "name": "Validate",
+                    "description": "Script to validate data insertion",
+                    "script_path": "m03_takeout_02b_validate_safenet.py"
+                }
+            ]
+        },
+        "Edge": {
+            "name": "Edge",
+            "folder": "C:\\SAFENET\\DataSetGlobal\\Forensic_Collect",
+            "steps": [
+                {
+                    "name": "Dump",
+                    "description": "Create forensic dump and normalize naming",
+                    "script_path": "m04_Edge_Local_Forensic_dump_HD.py"
+                },
+                {
+                    "name": "Create Table",
+                    "description": "Add table to contain data in database",
+                    "script_path": "m04_Edge_Local_Forensic_Insrt.sql"
+                },
+                {
+                    "name": "Load Data",
+                    "description": "Python script to fill the table",
+                    "script_path": "m04_Edge_Local_Forensic_INSERT_DB.py"
+                },
+                {
+                    "name": "Validate",
+                    "description": "Script to validate data insertion",
+                    "script_path": "m04_Edge_Local_Forensic_Validate.py"
                 }
             ]
         }
