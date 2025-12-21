@@ -17,12 +17,18 @@ from tkinter import messagebox, ttk
 
 CONFIG_FILE = Path(__file__).with_name("forensic_config.json")
 
-# Palette (gray gradient background, yellow foreground)
-BG_DARK = "#0f0f0f"
-BG_BASE = "#1c1c1c"
-CARD_BG = "#262626"
-TEXT_MAIN = "#ffd54f"
-ACCENT = "#ffca28"
+# Palette (neon-inspired background with cyan accents)
+BG_DARK = "#050816"
+BG_BASE = "#090c1f"
+CARD_BG = "#121b3a"
+TEXT_MAIN = "#9fffe0"
+ACCENT = "#00e5ff"
+
+# Typography choices for a sleeker look on Windows
+FONT_TITLE = ("Bahnschrift", 22, "bold")
+FONT_SECTION = ("Bahnschrift", 12, "bold")
+FONT_BODY = ("Bahnschrift", 11)
+FONT_MONO = ("Cascadia Code", 10)
 
 
 @dataclass
@@ -90,15 +96,18 @@ class ForensicConfig:
 
 
 def draw_radial_gradient(canvas: tk.Canvas, width: int, height: int) -> None:
-    """Draw a soft circular gray gradient on the canvas."""
+    """Draw a neon-inspired circular gradient on the canvas."""
     canvas.delete("gradient")
     radius = max(width, height) * 0.75
     cx, cy = width / 2, height / 2
     steps = 30
     for i in range(steps):
         ratio = i / steps
-        shade = int(15 + (40 * ratio))
-        color = f"#{shade:02x}{shade:02x}{shade:02x}"
+        base = 20 + int(35 * ratio)
+        red = max(0, base - 12)
+        green = max(0, base - 4)
+        blue = min(255, base + 90)
+        color = f"#{red:02x}{green:02x}{blue:02x}"
         r = radius * (1 - ratio * 0.95)
         canvas.create_oval(
             cx - r,
@@ -151,7 +160,7 @@ class ForensicApp:
             text="Forensic Bebboloidi Investigations - FangoShit",
             fg=TEXT_MAIN,
             bg=BG_BASE,
-            font=("Segoe UI", 20, "bold"),
+            font=FONT_TITLE,
         )
         title.pack(side="left", padx=16)
         settings_btn = tk.Button(
@@ -165,6 +174,7 @@ class ForensicApp:
             relief="flat",
             padx=12,
             pady=6,
+            font=FONT_SECTION,
         )
         settings_btn.pack(side="right", padx=4)
         refresh = tk.Button(
@@ -178,6 +188,7 @@ class ForensicApp:
             relief="flat",
             padx=12,
             pady=6,
+            font=FONT_SECTION,
         )
         refresh.pack(side="right", padx=4)
         quit_btn = tk.Button(
@@ -191,6 +202,7 @@ class ForensicApp:
             relief="flat",
             padx=10,
             pady=6,
+            font=FONT_SECTION,
         )
         quit_btn.pack(side="right", padx=4)
 
@@ -201,7 +213,7 @@ class ForensicApp:
         # Left: milestones list
         left = tk.Frame(main, bg=BG_BASE, padx=8)
         left.pack(side="left", fill="y")
-        lbl = tk.Label(left, text="Milestones", fg=TEXT_MAIN, bg=BG_BASE, font=("Segoe UI", 12, "bold"))
+        lbl = tk.Label(left, text="Milestones", fg=TEXT_MAIN, bg=BG_BASE, font=FONT_SECTION)
         lbl.pack(anchor="w")
         self.milestone_list = tk.Listbox(
             left,
@@ -209,7 +221,7 @@ class ForensicApp:
             fg=TEXT_MAIN,
             selectbackground=ACCENT,
             selectforeground=BG_DARK,
-            font=("Consolas", 11),
+            font=FONT_BODY,
             height=20,
             activestyle="none",
         )
@@ -220,14 +232,22 @@ class ForensicApp:
         right = tk.Frame(main, bg=BG_BASE, padx=8)
         right.pack(side="left", fill="both", expand=True)
 
-        globals_card = tk.Frame(right, bg=CARD_BG, padx=14, pady=10)
+        globals_card = tk.Frame(
+            right,
+            bg=CARD_BG,
+            padx=14,
+            pady=10,
+            highlightbackground=ACCENT,
+            highlightcolor=ACCENT,
+            highlightthickness=1,
+        )
         globals_card.pack(fill="x", pady=(0, 10))
         tk.Label(
             globals_card,
             text="Global Settings",
             fg=TEXT_MAIN,
             bg=CARD_BG,
-            font=("Segoe UI", 11, "bold"),
+            font=FONT_SECTION,
         ).pack(anchor="w")
         self.global_text = tk.Label(
             globals_card,
@@ -235,18 +255,26 @@ class ForensicApp:
             fg=TEXT_MAIN,
             bg=CARD_BG,
             justify="left",
-            font=("Consolas", 10),
+            font=FONT_MONO,
         )
         self.global_text.pack(anchor="w", pady=(4, 0))
 
-        steps_card = tk.Frame(right, bg=CARD_BG, padx=14, pady=10)
+        steps_card = tk.Frame(
+            right,
+            bg=CARD_BG,
+            padx=14,
+            pady=10,
+            highlightbackground="#162447",
+            highlightcolor="#162447",
+            highlightthickness=1,
+        )
         steps_card.pack(fill="both", expand=True)
         tk.Label(
             steps_card,
             text="Steps",
             fg=TEXT_MAIN,
             bg=CARD_BG,
-            font=("Segoe UI", 11, "bold"),
+            font=FONT_SECTION,
         ).pack(anchor="w")
         self.steps_tree = ttk.Treeview(
             steps_card,
@@ -269,8 +297,9 @@ class ForensicApp:
             fieldbackground=CARD_BG,
             rowheight=26,
             bordercolor=CARD_BG,
+            font=FONT_BODY,
         )
-        style.configure("Treeview.Heading", background=BG_DARK, foreground=TEXT_MAIN)
+        style.configure("Treeview.Heading", background=BG_DARK, foreground=TEXT_MAIN, font=FONT_SECTION)
         style.map("Treeview", background=[("selected", ACCENT)], foreground=[("selected", BG_DARK)])
 
     def _populate_globals(self) -> None:
@@ -322,13 +351,25 @@ class ForensicApp:
         win.grab_set()
 
         section_title = lambda text: tk.Label(
-            win, text=text, fg=TEXT_MAIN, bg=BG_BASE, font=("Segoe UI", 12, "bold")
+            win,
+            text=text,
+            fg=TEXT_MAIN,
+            bg=BG_BASE,
+            font=FONT_SECTION,
         )
 
         def add_field(parent, label, value):
             row = tk.Frame(parent, bg=BG_BASE, pady=4)
             row.pack(fill="x")
-            tk.Label(row, text=label, fg=TEXT_MAIN, bg=BG_BASE, width=18, anchor="w").pack(side="left")
+            tk.Label(
+                row,
+                text=label,
+                fg=TEXT_MAIN,
+                bg=BG_BASE,
+                width=18,
+                anchor="w",
+                font=FONT_BODY,
+            ).pack(side="left")
             entry = tk.Entry(
                 row,
                 fg=TEXT_MAIN,
@@ -336,6 +377,7 @@ class ForensicApp:
                 insertbackground=TEXT_MAIN,
                 relief="flat",
                 width=46,
+                font=FONT_BODY,
             )
             entry.insert(0, value or "")
             entry.pack(side="left", fill="x", expand=True, padx=(6, 0))
@@ -405,6 +447,7 @@ class ForensicApp:
             relief="flat",
             padx=14,
             pady=6,
+            font=FONT_SECTION,
         )
         save_btn.pack(side="right", padx=6)
 
@@ -419,6 +462,7 @@ class ForensicApp:
             relief="flat",
             padx=12,
             pady=6,
+            font=FONT_SECTION,
         )
         cancel_btn.pack(side="right", padx=6)
 
