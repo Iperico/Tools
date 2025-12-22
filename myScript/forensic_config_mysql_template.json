@@ -1,0 +1,25 @@
+{
+    "globals": {
+        "workspace_folder": "C:\\SAFENET",
+        "mysql_host": "127.0.0.1",
+        "mysql_port": 3306,
+        "mysql_user": "safenet_admin",
+        "mysql_password": "ChangeMe!2025",
+        "mysql_database": "forensic",
+        "mysql_cli": "C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql.exe",
+        "python_exe": ""
+    },
+    "milestones": {
+        "Stage 0 - Bootstrap": {
+            "name": "Stage 0 - Bootstrap",
+            "folder": "C:\\SAFENET\\DbScripts",
+            "steps": [
+                {
+                    "name": "Bootstrap DB",
+                    "description": "Create database/users + master tables (DEVICE_MASTER, ACCOUNT_MASTER, SCHEMA_VERSION)",
+                    "script_path": "mysql_forensic_init_optimized.sql"
+                }
+            ]
+        }
+    }
+}

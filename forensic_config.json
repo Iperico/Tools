@@ -3,112 +3,73 @@
         "workspace_folder": "C:\\SAFENET",
         "mysql_host": "127.0.0.1",
         "mysql_port": 3306,
-        "mysql_user": "forensic",
-        "mysql_password": "forensic",
-        "mysql_database": "forensic"
+        "mysql_user": "root",
+        "mysql_password": "admin",
+        "mysql_database": "forensic",
+        "mysql_cli": "C:\\Program Files\\MySQL\\MySQL Server 8.0\\bin\\mysql.exe",
+        "python_exe": "C:\\SAFENET\\safe\\Scripts\\python.exe"
     },
     "milestones": {
-        "Android ADB": {
-            "name": "Android ADB",
+        "Stage 0 - Bootstrap": {
+            "name": "Stage 0 - Bootstrap",
+            "folder": "C:\\SAFENET\\DbScripts",
+            "steps": [
+                {
+                    "name": "Bootstrap DB (optimized)",
+                    "description": "Create database/users + master tables (DEVICE_MASTER, ACCOUNT_MASTER, SCHEMA_VERSION). Run with a MySQL admin account.",
+                    "script_path": "mysql_forensic_init_optimized.sql"
+                }
+            ]
+        },
+        "M01 - Android ADB": {
+            "name": "M01 - Android ADB",
             "folder": "C:\\SAFENET\\DataSetGlobal\\android_adb_logs",
             "steps": [
                 {
-                    "name": "Dump",
-                    "description": "Create forensic dump and normalize naming",
-                    "script_path": "m01_android_adb_00_capture_log_dump_0_2.py"
-                },
-                {
-                    "name": "Create Table",
-                    "description": "Add table to contain data in database",
+                    "name": "Init schema (M01)",
+                    "description": "Create Android acquisitions + EVENTI_ANDROID tables (milestone DDL).",
                     "script_path": "m01_android_adb_01_init.sql"
                 },
                 {
-                    "name": "Load Data",
-                    "description": "Python script to fill the table",
-                    "script_path": "m01_android_adb_03_probe_load_to_EVENTI_ANDROID.py"
+                    "name": "Seed DEVICE_MASTER (optional)",
+                    "description": "Seed DEVICE_MASTER with known devices (optional).",
+                    "script_path": "m01_android_adb_01b_seed_DEVICE_MASTER.sql"
                 },
                 {
-                    "name": "Validate",
-                    "description": "Script to validate data insertion",
-                    "script_path": "m01_android_adb_04_validate_coherence.py"
+                    "name": "Capture log dump (ADB)",
+                    "description": "Run ADB capture pipeline (requires adb + device authorized).",
+                    "script_path": "m01_android_adb_00_capture_log_dump_0_2.py"
                 }
             ]
         },
-        "Windows Logs": {
-            "name": "Windows Logs",
+        "M02 - Windows Logs": {
+            "name": "M02 - Windows Logs",
             "folder": "C:\\SAFENET\\DataSetGlobal\\windows_logs",
             "steps": [
                 {
-                    "name": "Dump",
-                    "description": "Create forensic dump and normalize naming",
+                    "name": "Init schema (M02)",
+                    "description": "Create WINDOWS_ACQUISITIONS + EVENTI_PC tables (milestone DDL).",
+                    "script_path": "m02_windows_logs_01_init.sql"
+                },
+                {
+                    "name": "Log dump (EVTX\u2192CSV)",
+                    "description": "Export/convert EVTX to CSV + report.",
                     "script_path": "m02_windows_logs_01_log_dump.py"
                 },
                 {
-                    "name": "Create Table",
-                    "description": "Add table to contain data in database",
-                    "script_path": "m02_windows_logs_04_build_event_type_pipelines_pre.py"
+                    "name": "Extract to SAFENET",
+                    "description": "Normalize + validate datasets into SAFENET structure.",
+                    "script_path": "m02_windows_logs_02_extract_to_safenet.py"
                 },
                 {
-                    "name": "Load Data",
-                    "description": "Python script to fill the table",
+                    "name": "Load to EVENTI_PC (probe)",
+                    "description": "Load validated CSV into EVENTI_PC. NOTE: current script is SQLite-first; next step is to port it to MySQL.",
                     "script_path": "m02_windows_logs_03_probe_load_to_EVENTI_PC.py"
                 },
                 {
-                    "name": "Validate",
-                    "description": "Script to validate data insertion",
-                    "script_path": "pending"
-                }
-            ]
-        },
-        "Takeout": {
-            "name": "Takeout",
-            "folder": "C:\\SAFENET\\DataSetGlobal\\takeout",
-            "steps": [
-                {
-                    "name": "Dump",
-                    "description": "Create forensic dump and normalize naming",
-                    "script_path": "m03_takeout_02_extract_to_safenet.py"
-                },
-                {
-                    "name": "Create Table",
-                    "description": "Add table to contain data in database",
-                    "script_path": "m03_takeout_01_init.sql"
-                },
-                {
-                    "name": "Load Data",
-                    "description": "Python script to fill the table",
-                    "script_path": "m03_takeout_03_probe_load_to_EVENTI_ANDROID.py"
-                },
-                {
-                    "name": "Validate",
-                    "description": "Script to validate data insertion",
-                    "script_path": "m03_takeout_02b_validate_safenet.py"
-                }
-            ]
-        },
-        "Edge": {
-            "name": "Edge",
-            "folder": "C:\\SAFENET\\DataSetGlobal\\Forensic_Collect",
-            "steps": [
-                {
-                    "name": "Dump",
-                    "description": "Create forensic dump and normalize naming",
-                    "script_path": "m04_Edge_Local_Forensic_dump_HD.py"
-                },
-                {
-                    "name": "Create Table",
-                    "description": "Add table to contain data in database",
-                    "script_path": "m04_Edge_Local_Forensic_Insrt.sql"
-                },
-                {
-                    "name": "Load Data",
-                    "description": "Python script to fill the table",
-                    "script_path": "m04_Edge_Local_Forensic_INSERT_DB.py"
-                },
-                {
-                    "name": "Validate",
-                    "description": "Script to validate data insertion",
-                    "script_path": "m04_Edge_Local_Forensic_Validate.py"
+                    "name": "Build event pipelines (pre)",
+                    "description": "Pre-build event-type pipelines configuration.",
+                    "script_path": "m02_windows_logs_04_build_event_type_pipelines_pre.py"
                 }
             ]
         }
