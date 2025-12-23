@@ -1,54 +1,64 @@
-# DB Forensic – README generale
+# DB Forensic - README generale
 
-Questo README descrive in breve la strategia di costruzione del database forense, i passi standard della pipeline e dove trovare gli script principali.
+Questo README descrive la strategia attuale del DB forense SAFENET e le
+procedure standard per le milestone.
 
-## Strategia in sintesi
-- Milestone per sorgente (M01 Android ADB, M02 Windows logs, poi Takeout/Drive/Gmail…).
-- Ogni sorgente segue lo stesso schema: init SQL → estrazione in SAFENET → validazione → caricamento su tabelle EVENTI_*.
-- Directory convenzionali: `C:/SAFENET/DB/forensic.db` per il DB, `C:/SAFENET/DataSetGlobal/...` per i dati normalizzati, `C:/SAFENET/Tools/` per script e SQL.
-- Tabelle di base (da `DEVICE_MASTER` e `ACCOUNT_MASTER`) già esistenti o da creare a parte.
+## Strategia attuale (MySQL first)
+- MySQL e' il database di riferimento per il lavoro nuovo.
+- SQLite e' legacy o solo per migrazioni/compatibilita'.
+- Bootstrap core separato dal DDL milestone:
+  - Bootstrap: `mysql_forensic_init_optimized.sql` (oppure `myScript/mysql_forensic_init.sql`)
+    crea DEVICE_MASTER, ACCOUNT_MASTER, SCHEMA_VERSION.
+  - Milestone DDL: `mXX_*_01_init.mysql.sql` (primario) e `.sql` legacy.
+- Ogni milestone produce ACQUISITIONS + EVENTI_* e usa DataSetGlobal
+  come area normalizzata.
 
-## Pipeline (ASCII)
-```text
-Sorgenti grezze                     SAFENET                  Database forense
-(dump ADB, evtx, ecc.)              DataSetGlobal            forensic.db (SQLite)
-    |                                   |                          |
-    |  _02_extract_*                    |                          |
-    +--> normalizza e copia --------> [RAW/META/...]               |
-    |                                   |                          |
-    |  _02b_validate_*                  |                          |
-    +--> confronta sorgente e SAFENET   |                          |
-    |                                   v                          |
-    |                            (pronto per load)                 |
-    |                                   |  _03_load_*              |
-    +-----------------------------------+------------------------->+--> ACQUISITIONS
-                                        |                          \--> EVENTI_*
-```
+## Procedura standard per ogni milestone
+1. Bootstrap (una volta): eseguire lo script bootstrap MySQL.
+2. Init milestone: eseguire `mXX_*_01_init.mysql.sql`.
+3. Acquisizione: raccogliere i dati grezzi con lo strumento previsto.
+4. Extract to SAFENET: `mXX_*_02_extract_to_safenet.py` copia in DataSetGlobal
+   e scrive `META/acquisition_meta.json`.
+5. Validate: `mXX_*_02b_validate_safenet.py` verifica coerenza sorgente vs SAFENET.
+6. Load: `mXX_*_03_probe_load_to_EVENTI_*.py` inserisce in EVENTI_* (supporto dry-run).
+7. Post-check (opzionale): `mXX_*_04_*` per coerenza, conteggi, coverage.
 
-Legenda (per ogni sorgente):
-- `_01_init.sql`: crea/accenta le tabelle dedicate (ACQUISITIONS, EVENTI_*).
-- `_02_extract_to_safenet.py`: copia/riorganizza i dump grezzi in `DataSetGlobal` e registra l’acquisizione.
-- `_02b_validate_safenet.py`: controlli di integrità tra sorgente e copia normalizzata.
-- `_03_load_to_EVENTI_*.py`: parsing e traduzione in eventi logici nel DB.
+## Contratto minimo (funzionalita standard)
+- Struttura dataset:
+  `DataSetGlobal/<source>/<device_or_account>/<tool_tag>/<run_id>/...`
+- `META/acquisition_meta.json` sempre presente.
+- Tabella `*_ACQUISITIONS` aggiornata con device/account label, run_id,
+  tool_tag, percorsi e stato.
+- Loader usa mapping in DEVICE_MASTER/ACCOUNT_MASTER e registra device_id/account_id
+  quando disponibili.
+- Flags minimi consigliati: `--dataset-root`, `--mysql-host`, `--mysql-port`,
+  `--mysql-user`, `--mysql-password`, `--mysql-database`, `--dry-run`.
 
-## Milestone attuali
-- **M01 Android ADB**: tabelle [Tools/m01_android_adb_01_init.sql](Tools/m01_android_adb_01_init.sql), estrazione [Tools/m01_android_adb_02_extract_to_safenet.py](Tools/m01_android_adb_02_extract_to_safenet.py), validazione [Tools/m01_android_adb_02b_validate_safenet.py](Tools/m01_android_adb_02b_validate_safenet.py), caricamento previsto [Tools/m01_android_adb_03_probe_load_to_EVENTI_ANDROID.py](Tools/m01_android_adb_03_probe_load_to_EVENTI_ANDROID.py).
-- **M02 Windows logs**:
-    - Init SQL [Tools/m02_windows_logs_01_init.sql](Tools/m02_windows_logs_01_init.sql): crea `WINDOWS_ACQUISITIONS` e `EVENTI_PC` con indici.
-    - Raccolta/triage locale [Tools/m02_windows_logs_01_log_dump.py](Tools/m02_windows_logs_01_log_dump.py) per esportare/riassumere EVTX/CSV (report markdown/CSV).
-    - Normalizzazione in SAFENET [Tools/m02_windows_logs_02_extract_to_safenet.py](Tools/m02_windows_logs_02_extract_to_safenet.py): attende sorgenti `<device_label>_<run_id>/EVTX/...` e popola `DataSetGlobal/windows_logs/<device_label>/<tool_tag>/<run_id>/` con `META`, `LOGS/<Security|System|Application|PowerShell|AMSI>`, `RAW_ALL`; registra l'acquisizione se DB passato.
-    - Probe/ingest [Tools/m02_windows_logs_03_probe_load_to_EVENTI_PC.py](Tools/m02_windows_logs_03_probe_load_to_EVENTI_PC.py): legge i CSV normalizzati e inserisce in `EVENTI_PC` (filtri per `--source-log`, `--event-code`, `--device-label`, supporto `--dry-run`).
-    - Analisi copertura [Tools/m02_windows_logs_04_build_event_type_pipelines_pre.py](Tools/m02_windows_logs_04_build_event_type_pipelines_pre.py): genera `event_type_pipelines.json` con i tipi di evento più popolati (per costruire pipeline ETL mirate).
-- Milestone future: Takeout/My Activity, Drive, Gmail, TIMELINE_MASTER (schema analogo con prefissi m03, m04, m05…).
+## Milestone correnti
+- M01 Android ADB:
+  - DDL: `m01_android_adb_01_init.sql`, `myScript/m01_android_adb_01_init.mysql.sql`
+  - Seed device (opzionale): `m01_android_adb_01b_seed_DEVICE_MASTER.sql`
+  - Extract/Validate/Load: `m01_android_adb_02_extract_to_safenet.py`,
+    `m01_android_adb_02b_validate_safenet.py`,
+    `m01_android_adb_03_probe_load_to_EVENTI_ANDROID.py` (SQLite legacy).
+  - Post-check: `m01_android_adb_04_validate_coherence.py`
+- M02 Windows logs:
+  - DDL: `m02_windows_logs_01_init.sql`, `myScript/m02_windows_logs_01_init.mysql.sql`
+  - Triage: `m02_windows_logs_01_log_dump.py`
+  - Extract/Load: `m02_windows_logs_02_extract_to_safenet.py`,
+    `m02_windows_logs_03_probe_load_to_EVENTI_PC.py` (MySQL).
+  - Coverage: `m02_windows_logs_04_build_event_type_pipelines_pre.py`
+- M03 Takeout:
+  - DDL: `m03_takeout_01_init.sql` (MySQL port in progress)
+  - Runner: `m03_takeout_00_interactive_runner.py`
+  - Extract/Validate/Load: `m03_takeout_02_extract_to_safenet.py`,
+    `m03_takeout_02b_validate_safenet.py`,
+    `m03_takeout_03_probe_load_to_EVENTI_ANDROID.py` (SQLite legacy).
+- M04 Edge Local Forensic (da riallineare al contratto standard):
+  - `m04_Edge_Local_Forensic_dump.*`, `m04_Edge_Local_Forensic_Validate.py`,
+    `m04_Edge_Local_Forensic_INSERT_DB.py`, `m04_Edge_Local_Forensic_Insrt.sql`
 
-## Passi consigliati per costruire il DB
-1. Creare/aggiungere il DB: `sqlite3 forensic.db` in `C:/SAFENET/DB`.
-2. Eseguire i file `_01_init.sql` rilevanti per la sorgente.
-3. Lanciare lo script `_02_extract_to_safenet.py` con `--source`, `--target` e `--db` per popolare `DataSetGlobal` e registrare l’acquisizione.
-4. Eseguire `_02b_validate_safenet.py` per assicurare coerenza tra sorgente e copia.
-5. Usare `_03_load_to_EVENTI_*.py` per popolare le tabelle EVENTI_* a partire dai file normalizzati.
-
-## Note operative
-- Tenere separati i percorsi sorgente originali (sola lettura) dalla destinazione `DataSetGlobal`.
-- Versionare gli script in `Tools/` e non modificare i dump sorgente.
-- Aggiornare `00_TUTORIAL_DB_FORENSIC.md` quando cambia la sequenza operativa di una milestone.
+## Doc
+- `00_TUTORIAL_DB_FORENSIC.md`
+- `M01_Android_ADB_README.md`
+- `M03_Takeout_README.md`

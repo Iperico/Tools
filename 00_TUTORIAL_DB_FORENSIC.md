@@ -1,294 +1,232 @@
-# DB FORENSIC – TUTORIAL & ROADMAP (SQLite, per milestone)
+# DB FORENSIC - TUTORIAL AND ROADMAP (MySQL first)
 
-Questo file descrive **come usare il progetto DB FORENSIC a milestone**, con
-comandi concreti (per ora usando **SQLite** e **script Python locali**).
-
-L’idea: non rifare ogni volta il setup da zero, ma avere una sequenza chiara per
-ogni sorgente di log (Android ADB, Windows log, Takeout, Drive, Gmail, …).
-
----
+Questo file descrive come usare il progetto DB FORENSIC per milestone.
+MySQL e' il riferimento per il lavoro nuovo, SQLite e' legacy.
 
 ## 0. Prerequisiti generali
-
-### 0.1. Strumenti
-
-- **Python 3.x** disponibile in `PATH` (es. `python` o `python3`)
-- **SQLite CLI** (`sqlite3`) installata e disponibile in `PATH`
-- Struttura directory tipo:
-
-  ```text
-  C:\SAFENET\
-    DataSetGlobal\          <-- destinazione normalizzata (SAFENET)
-    DB\                      <-- dove tenere il DB forense .sqlite
-    Tools\                   <-- script Python / SQL del progetto
-  ```
-
-Puoi ovviamente adattare i path, ma in questo tutorial useremo:
-
-- Database: `C:\SAFENET\DB\forensic.db`
-- Script SQL/Python: `C:\SAFENET\Tools\...`
-
-### 0.2. Convezioni file / milestone
-
-Per ogni “sorgente” di dati ci saranno almeno:
-
-- `mXX_<source>_01_init.sql` → inizializzazione tabelle per quel tipo (ACQUISITIONS, EVENTI_*)
-- `mXX_<source>_02_extract_to_safenet.py` → da dump grezzi → SAFENET `DataSetGlobal\...`
-- `mXX_<source>_02b_validate_safenet.py` → controllo di integrità
-- `mXX_<source>_03_load_to_EVENTI_*.py` → da SAFENET → tabelle EVENTI_* nel DB
-
-Dove `XX` è il numero milestone, e `<source>` qualcosa tipo `android_adb`, `windows_logs`, ecc.
-
----
-
-## 1. Creazione / apertura DB SQLite
-
-Se non hai ancora il DB forense:
-
-```bash
-cd C:\SAFENET\DB
-sqlite3 forensic.db
-```
-
-Dentro la shell di sqlite puoi verificare che è vuoto:
-
-```sql
-.tables
-```
-
-(Non deve restituire nulla o solo le tabelle di sistema).
-
-Per uscire:
-
-```sql
-.quit
-```
-
----
-
-## 2. Milestone M01 – Android ADB logs
-
-**Scopo**: acquisizioni da `android_log_dump_0.2` → SAFENET → pronti per EVENTI_ANDROID.
-
-### 2.1. Inizializzazione tabelle Android (init SQL)
-
-Assumiamo di aver copiato:
-
-- `m01_android_adb_01_init.sql` in `C:\SAFENET\Tools\`
-
-Lanciare:
-
-```bash
-cd C:\SAFENET\DB
-sqlite3 forensic.db ".read C:/SAFENET/Tools/m01_android_adb_01_init.sql"
-```
-
-Oppure entrare nella shell:
-
-```bash
-cd C:\SAFENET\DB
-sqlite3 forensic.db
-```
-
-e poi:
-
-```sql
-.read C:/SAFENET/Tools/m01_android_adb_01_init.sql
-.tables
-```
-
-Dovresti vedere comparire almeno:
-
-- `ANDROID_ACQUISITIONS`
-- `EVENTI_ANDROID`
-
-> Nota: si assume che `DEVICE_MASTER` e `ACCOUNT_MASTER` siano già stati creati in altre fasi del progetto.
-
-### 2.2. Preparazione directory sorgente Android
-
-La sorgente dei dump ADB la immaginiamo così:
+- Python 3.x disponibile in PATH.
+- MySQL client (`mysql`) disponibile in PATH.
+- SQLite CLI solo se devi usare script legacy (`sqlite3`).
+- Struttura directory consigliata:
 
 ```text
-D:\Evidence\ANDROID_Mobile\android_logs\
-  samsung_SM-S921B_RZCX60536TD_20251129_031934\
-  samsung_SM-G980F_RF8N31XTXAD_20251129_035052\
-  samsung_SM-A600FN_5200870afec93535_20251129_040926\
-    device_info_*.txt
-    logcat_main_*.txt
-    logcat_events_*.txt
-    logcat_radio_*.txt
-    logcat_crash_*.txt
-    getprop_*.txt
-    dmesg_*.txt
-    dumpsys_*_*.txt
-    packages_*_*.txt
-    ...
+C:\SAFENET\
+  DataSetGlobal\     <-- dataset normalizzati
+  DB\                <-- DB legacy SQLite (se serve)
+  Tools\             <-- script e SQL
 ```
 
-### 2.3. Normalizzazione in SAFENET (estrazione)
+## 1. Bootstrap core (una volta)
+Il bootstrap crea DEVICE_MASTER, ACCOUNT_MASTER, SCHEMA_VERSION.
 
-Assumiamo di avere uno script tipo:
+Script principali:
+- `mysql_forensic_init_optimized.sql`
+- `myScript/mysql_forensic_init.sql`
 
-- `m01_android_adb_02_extract_to_safenet.py` (derivato da `android_logs_to_safenet_auto.py`)
-
-e che sia in `C:\SAFENET\Tools\`.
-
-Esempio di esecuzione:
+Esempio MySQL:
 
 ```bash
-cd C:\SAFENET\Tools
-
-python m01_android_adb_02_extract_to_safenet.py ^
-    --source "D:/Evidence/ANDROID_Mobile/android_logs" ^
-    --target "C:/SAFENET/DataSetGlobal/android_adb_logs" ^
-    --db "C:/SAFENET/DB/forensic.db"
+mysql -h 127.0.0.1 -P 3306 -u forensic -p forensic < C:\SAFENET\Tools\mysql_forensic_init_optimized.sql
 ```
 
-Lo script deve:
+Nota: il DDL delle milestone e' separato e va eseguito per ogni sorgente.
 
-1. Leggere le cartelle `samsung_*_<run_id>` dalla sorgente.
-2. Mappare il pattern sul `device_logical` (es. `ANDR_IO_S24`, `ANDR_ALE_S20`, `ANDR_ALE_A6`).
-3. Creare la struttura:
+## 2. Procedura standard per ogni milestone (runbook)
+1. Init milestone: eseguire `mXX_*_01_init.mysql.sql`.
+2. Acquisizione: raccogliere i dati grezzi con lo strumento previsto.
+3. Extract to SAFENET: `mXX_*_02_extract_to_safenet.py`.
+4. Validate: `mXX_*_02b_validate_safenet.py` (exit code nonzero se mismatch).
+5. Load: `mXX_*_03_probe_load_to_EVENTI_*.py`.
+6. Post-check (opzionale): `mXX_*_04_*` per coerenza/coverage.
 
-   ```text
-   C:\SAFENET\DataSetGlobal\android_adb_logs\<device_logical>\android_log_dump_0.2\<run_id>\...
-   ```
+Flags MySQL consigliati per i loader:
+- `--mysql-host`, `--mysql-port`, `--mysql-user`, `--mysql-password`, `--mysql-database`
+- `--dataset-root`, `--dry-run`, `--limit-per-run` (quando presenti)
 
-4. Copiare i file in `RAW_ALL`, `META`, `CORE_SYSTEM`, `CONNECTIVITY`, `APPS_PACKAGES`.
-5. Scrivere/aggiornare `META/acquisition_meta.json`.
-6. Inserire una riga in `ANDROID_ACQUISITIONS` per ogni run (usando il DB indicato con `--db`).
+## 2.1. Grafo DB e esempi (3 righe per tabella)
+Nota: esempi sintetici per controllo umano (non dati reali). Colonne ridotte alle chiavi principali.
 
-### 2.4. Validazione integrità (Android)
+Grafo (relazioni principali):
+```text
+[DEVICE_MASTER] 1---< [ANDROID_ACQUISITIONS]
+[DEVICE_MASTER] 1---< [WINDOWS_ACQUISITIONS]
+[DEVICE_MASTER] 1---< [EVENTI_ANDROID]
+[DEVICE_MASTER] 1---< [EVENTI_PC]
+[ACCOUNT_MASTER] 1---< [EVENTI_ANDROID]
+[ACCOUNT_MASTER] 1---< [EVENTI_PC]
+[ACCOUNT_MASTER] 1---< [TAKEOUT_ACQUISITIONS] (SQLite legacy)
+[SCHEMA_VERSION] (audit, no FK)
+```
 
-Assumiamo di avere:
+Esempi (3 righe per tabella):
+```text
+DEVICE_MASTER
++-----------+--------------+------------+----------+
+| device_id | device_label | device_type| platform |
++-----------+--------------+------------+----------+
+| 1         | ANDR_IO_S24  | phone      | Android  |
+| 2         | PC_ALE_01    | PC         | Windows  |
+| 3         | LAP_MAR_01   | laptop     | Windows  |
++-----------+--------------+------------+----------+
 
-- `m01_android_adb_02b_validate_safenet.py` (derivato da `validation_android.py`)
+ACCOUNT_MASTER
++-----------+---------------+----------+-------------+
+| account_id| account_label | provider | owner_label |
++-----------+---------------+----------+-------------+
+| 1         | ACC_OMI_MAIN  | google   | Omi         |
+| 2         | ACC_ALE_WORK  | google   | Ale         |
+| 3         | ACC_TEST_01   | generic  | Lab         |
++-----------+---------------+----------+-------------+
 
-Esempio uso:
+SCHEMA_VERSION
++--------------+--------------+---------------------+---------------+
+| module_name  | version_label| applied_at_utc      | applied_by    |
++--------------+--------------+---------------------+---------------+
+| core-bootstrap | v2         | 2025-01-10 10:15:00 | safenet_admin |
+| m01-android  | v1           | 2025-01-12 09:30:00 | safenet_admin |
+| m02-windows  | v1           | 2025-01-12 10:00:00 | safenet_admin |
++--------------+--------------+---------------------+---------------+
+
+ANDROID_ACQUISITIONS
++----------------+----------+---------------+-----------------------+---------------------+
+| acquisition_id | device_id| run_id        | script_name           | acquisition_time_utc|
++----------------+----------+---------------+-----------------------+---------------------+
+| 1              | 1        | 20250110_1015 | android_log_dump_0.2  | 2025-01-10 10:20:00 |
+| 2              | 1        | 20250111_0830 | android_log_dump_0.2  | 2025-01-11 08:35:00 |
+| 3              | 1        | 20250112_0905 | android_log_dump_0.2  | 2025-01-12 09:10:00 |
++----------------+----------+---------------+-----------------------+---------------------+
+
+EVENTI_ANDROID
++-----------------+---------------------+----------+-----------+---------+-----------+------------------------+
+| android_event_id| timestamp_utc       | device_id| account_id| product | app       | title                  |
++-----------------+---------------------+----------+-----------+---------+-----------+------------------------+
+| 1               | 2025-01-10 10:21:10 | 1        | 1         | SYSTEM  | logcat    | ActivityManager start  |
+| 2               | 2025-01-10 10:22:05 | 1        | 1         | SYSTEM  | logcat    | Network change         |
+| 3               | 2025-01-11 08:40:12 | 1        | 2         | PLAY    | com.app.x | App install            |
++-----------------+---------------------+----------+-----------+---------+-----------+------------------------+
+
+WINDOWS_ACQUISITIONS
++----------------------+----------+--------------+----------+-----------+---------------------+
+| windows_acquisition_id| device_id| run_id       | log_type | tool_name | acquisition_time_utc|
++----------------------+----------+--------------+----------+-----------+---------------------+
+| 1                    | 2        | 20250110_1200| Security | wevtutil  | 2025-01-10 12:05:00 |
+| 2                    | 2        | 20250110_1200| System   | wevtutil  | 2025-01-10 12:05:00 |
+| 3                    | 3        | 20250111_0745| Security | wevtutil  | 2025-01-11 07:50:00 |
++----------------------+----------+--------------+----------+-----------+---------------------+
+
+EVENTI_PC
++-------------+---------------------+----------+-----------+-----------+------------+
+| pc_event_id | timestamp_utc       | device_id| account_id| source_log| event_code |
++-------------+---------------------+----------+-----------+-----------+------------+
+| 1           | 2025-01-10 12:10:01 | 2        | 2         | Security  | 4624       |
+| 2           | 2025-01-10 12:12:44 | 2        | 2         | Security  | 4634       |
+| 3           | 2025-01-11 08:02:10 | 3        | 3         | System    | 7001       |
++-------------+---------------------+----------+-----------+-----------+------------+
+
+TAKEOUT_ACQUISITIONS (SQLite legacy)
++-----------+-----------+---------------+---------------------+-------------+
+| takeout_id| account_id| takeout_label | acquisition_ts_utc  | tool_version|
++-----------+-----------+---------------+---------------------+-------------+
+| 1         | 1         | takeout_202501| 2025-01-10 18:00:00 | v1          |
+| 2         | 1         | takeout_202502| 2025-02-15 09:30:00 | v1          |
+| 3         | 2         | takeout_202503| 2025-03-01 14:20:00 | v1          |
++-----------+-----------+---------------+---------------------+-------------+
+`" + 
+ + 
+ + 
+- MySQL: `myScript/m01_android_adb_01_init.mysql.sql`
+- SQLite legacy: `m01_android_adb_01_init.sql`
+
+Esempi:
 
 ```bash
-cd C:\SAFENET\Tools
-
-python m01_android_adb_02b_validate_safenet.py ^
-    --source "D:/Evidence/ANDROID_Mobile/android_logs" ^
-    --target "C:/SAFENET/DataSetGlobal/android_adb_logs" ^
-    --db "C:/SAFENET/DB/forensic.db"
+python C:\SAFENET\Tools\m01_android_adb_02_extract_to_safenet.py ^
+  --android-logs-root "D:\Evidence\ANDROID_Mobile\android_logs" ^
+  --dataset-root "C:\SAFENET\DataSetGlobal\android_adb_logs"
 ```
-
-Lo script dovrebbe:
-
-- confrontare i file sorgente con quelli in `RAW_ALL` (nome, dimensione, opzionale hash)
-- verificare che i file con prefissi noti siano presenti anche nelle categorie (`CORE_SYSTEM`, ecc.)
-- aggiornare eventualmente `ANDROID_ACQUISITIONS` con lo stato di validazione
-- uscire con exit code 0 se tutto ok, >0 se c’è qualche problema
-
-### 2.5. Popolamento EVENTI_ANDROID (fase successiva)
-
-Script previsto (non ancora implementato):  
-`m01_android_adb_03_load_to_EVENTI_ANDROID.py`
-
-Esempio di uso previsto:
 
 ```bash
-cd C:\SAFENET\Tools
-
-python m01_android_adb_03_load_to_EVENTI_ANDROID.py ^
-    --target "C:/SAFENET/DataSetGlobal/android_adb_logs" ^
-    --db "C:/SAFENET/DB/forensic.db"
+python C:\SAFENET\Tools\m01_android_adb_02b_validate_safenet.py ^
+  --android-logs-root "D:\Evidence\ANDROID_Mobile\android_logs" ^
+  --dataset-root "C:\SAFENET\DataSetGlobal\android_adb_logs"
 ```
 
-Questo script leggerà i file in `CORE_SYSTEM`, `CONNECTIVITY`, `APPS_PACKAGES` e `META`,
-riconoscerà gli eventi di interesse (pattern su logcat, dumpsys, ecc.) e li tradurrà in
-righe di `EVENTI_ANDROID` con:
+Loader attuale:
+- `m01_android_adb_03_probe_load_to_EVENTI_ANDROID.py` e' SQLite legacy.
+  Porting MySQL richiesto per allinearsi allo standard.
 
-- `timestamp_utc`
-- `device_id`
-- `account_id` (se mappabile)
-- `product`, `app`, `title`, `title_url`
-- `source_file`, `ip_remoto`, `extra_details`
-- `sospetto_flag`, `motivazione_sospetto`
+Post-check:
+- `m01_android_adb_04_validate_coherence.py`
+## 4. M02 - Windows logs
+DDL:
+- MySQL: `myScript/m02_windows_logs_01_init.mysql.sql`
+- SQLite legacy: `m02_windows_logs_01_init.sql`
 
----
-
-## 3. Milestone M02 – Windows logs (bozza)
-
-> ⚠️ Questa sezione è un **placeholder**: serve solo per dare la forma modulare.
-> Il dettaglio verrà definito dopo aver chiuso bene M01.
-
-### 3.1. Init Windows
-
-File previsto:
-
-- `m02_windows_logs_01_init.sql`
-
-Comandi tipici:
+Triage locale:
 
 ```bash
-cd C:\SAFENET\DB
-sqlite3 forensic.db ".read C:/SAFENET/Tools/m02_windows_logs_01_init.sql"
+python C:\SAFENET\Tools\m02_windows_logs_01_log_dump.py ^
+  --source "D:\Evidence\WINDOWS_Logs" ^
+  --out "C:\SAFENET\Reports\windows_logs"
 ```
 
-Dovrebbe creare:
-
-- `WINDOWS_ACQUISITIONS`
-- assicurare l’esistenza/struttura di `EVENTI_PC`
-
-### 3.2. Estrattore Windows → SAFENET
-
-File previsto:
-
-- `m02_windows_logs_02_extract_to_safenet.py`
-
-Esempio uso:
+Extract:
 
 ```bash
-cd C:\SAFENET\Tools
-
-python m02_windows_logs_02_extract_to_safenet.py ^
-    --source "D:/Evidence/WINDOWS_Logs" ^
-    --target "C:/SAFENET/DataSetGlobal/windows_logs" ^
-    --db "C:/SAFENET/DB/forensic.db"
+python C:\SAFENET\Tools\m02_windows_logs_02_extract_to_safenet.py ^
+  --source "D:\Evidence\WINDOWS_Logs" ^
+  --target "C:\SAFENET\DataSetGlobal\windows_logs"
 ```
 
-### 3.3. Validazione & load
+Load (MySQL):
 
-Analoghi a M01:
+```bash
+python C:\SAFENET\Tools\m02_windows_logs_03_probe_load_to_EVENTI_PC.py ^
+  --dataset-root "C:\SAFENET\DataSetGlobal\windows_logs" ^
+  --mysql-host 127.0.0.1 ^
+  --mysql-port 3306 ^
+  --mysql-user forensic ^
+  --mysql-password "..." ^
+  --mysql-database forensic ^
+  --source-log Security ^
+  --limit-per-run 100 ^
+  --dry-run
+```
 
-- `m02_windows_logs_02b_validate_safenet.py`
-- `m02_windows_logs_03_load_to_EVENTI_PC.py`
+Post-check:
+- `m02_windows_logs_04_build_event_type_pipelines_pre.py`
 
----
+## 5. M03 - Takeout
+DDL:
+- `m03_takeout_01_init.sql` (porting MySQL in progress)
 
-## 4. Milestone future (placeholder comandi)
+Runner:
+- `m03_takeout_00_interactive_runner.py`
 
-Analogamente verranno aggiunte:
+Extract/Validate/Load:
+- `m03_takeout_02_extract_to_safenet.py`
+- `m03_takeout_02b_validate_safenet.py`
+- `m03_takeout_03_probe_load_to_EVENTI_ANDROID.py` (SQLite legacy)
 
-- **M03 – Takeout / My Activity**
-- **M04 – Drive activity**
-- **M05 – Gmail activity**
-- **M06 – TIMELINE_MASTER**
+## 6. Milestone future
+- M04 Edge Local Forensic (da riallineare al contratto standard)
+- M05 Gmail
+- M06 TIMELINE_MASTER
 
-Ognuna con i suoi file:
+## 7. UI runner (opzionale)
+Per eseguire gli step da UI:
+- `milestone_ui_mysql_runner.py`
+- Configurazione: `forensic_config.json`
 
-- `m0X_<source>_01_init.sql`
-- `m0X_<source>_02_extract_to_safenet.py`
-- `m0X_<source>_02b_validate_safenet.py`
-- `m0X_<source>_03_load_to_EVENTI_*.py`
 
-e comandi d’esempio in questo stesso `00_TUTORIAL_DB_FORENSIC.md`.
 
----
 
-## 5. Strategia di lavoro consigliata
 
-1. **Chiudere M01 Android ADB** end-to-end:
-   - init SQL eseguito
-   - estrazione funzionante per S24 / S20 / A6
-   - validazione pulita
-   - (idealmente) prima versione di `*_load_to_EVENTI_ANDROID.py` anche se minimale
 
-2. Solo dopo, passare a **M02 Windows logs** con lo stesso schema mentale.
 
-3. Evitare di mescolare i passi delle milestone: ogni sorgente deve avere
-   la sua mini-pipeline completa e documentata qui, così non ti ritrovi
-   con script zombie difficili da manutenere.
+
+
+
+
+
+

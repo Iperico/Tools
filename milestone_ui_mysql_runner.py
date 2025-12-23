@@ -19,13 +19,15 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, asdict, field
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import tkinter as tk
-from tkinter import messagebox, ttk, filedialog
+from tkinter import messagebox, ttk, filedialog, simpledialog
 
 CONFIG_FILE = Path(__file__).with_name("forensic_config.json")
+STATE_FILE = Path(__file__).with_name("forensic_state.json")
 
 # Palette
 BG_DARK = "#050816"
@@ -39,18 +41,29 @@ FONT_SECTION = ("Bahnschrift", 12, "bold")
 FONT_BODY = ("Bahnschrift", 11)
 FONT_MONO = ("Cascadia Code", 10)
 
+OP_ALL = "ALL"
+OP_INIT = "INIT"
+OP_EXTRACT = "EXTRACT"
+OP_VALIDATE = "VALIDATE"
+OP_INSERT = "INSERT"
+OP_UNKNOWN = "UNSET"
+OP_DISPLAY = [OP_INIT, OP_EXTRACT, OP_VALIDATE, OP_INSERT]
+OP_FILTERS = [OP_ALL] + OP_DISPLAY
+
 # ------------- Config models -------------
 @dataclass
 class Step:
     name: str
     description: str
     script_path: Optional[str] = None
+    operation: Optional[str] = None
 
 @dataclass
 class Milestone:
     name: str
     folder: Optional[str] = None
     steps: List[Step] = field(default_factory=list)
+    external_collect: bool = False
 
 @dataclass
 class GlobalSettings:
@@ -83,6 +96,7 @@ class ForensicConfig:
             milestones[key] = Milestone(
                 name=ms["name"],
                 folder=ms.get("folder"),
+                external_collect=bool(ms.get("external_collect", False)),
                 steps=[Step(**s) for s in ms.get("steps", [])],
             )
         return cls(globals=globals_cfg, milestones=milestones)
@@ -94,6 +108,24 @@ class ForensicConfig:
         return cls.from_json(path.read_text(encoding="utf-8"))
 
     def save(self, path: Path = CONFIG_FILE) -> None:
+        path.write_text(self.to_json(), encoding="utf-8")
+
+# ------------- Local state -------------
+@dataclass
+class ForensicState:
+    init_runs: Dict[str, Dict[str, str]] = field(default_factory=dict)
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self), indent=4)
+
+    @classmethod
+    def load(cls, path: Path = STATE_FILE) -> "ForensicState":
+        if not path.exists():
+            return cls()
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return cls(init_runs=data.get("init_runs", {}))
+
+    def save(self, path: Path = STATE_FILE) -> None:
         path.write_text(self.to_json(), encoding="utf-8")
 
 # ------------- Helpers -------------
@@ -144,6 +176,27 @@ def run_subprocess(cmd: List[str], cwd: Optional[Path] = None, env: Optional[dic
     except Exception as e:
         return 1, f"Exception: {e}"
 
+def normalize_operation(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    v = value.strip().upper()
+    return v if v in OP_DISPLAY else None
+
+def infer_operation(step: Step) -> str:
+    text = " ".join([step.name, step.description, step.script_path or ""]).lower()
+    if any(k in text for k in ("init", "bootstrap", "schema")):
+        return OP_INIT
+    if any(k in text for k in ("insert", "load", "seed", "import")):
+        return OP_INSERT
+    if any(k in text for k in ("validate", "verify", "check", "normalize")):
+        return OP_VALIDATE
+    if any(k in text for k in ("extract", "dump", "capture", "export", "acquire")):
+        return OP_EXTRACT
+    return OP_UNKNOWN
+
+def step_key(step: Step) -> str:
+    return step.script_path or step.name
+
 # ------------- UI -------------
 class ForensicApp:
     def __init__(self, root: tk.Tk):
@@ -153,6 +206,9 @@ class ForensicApp:
         self.root.configure(bg=BG_BASE)
 
         self.config = ForensicConfig.load()
+        self.state = ForensicState.load()
+        self._current_milestone: Optional[Milestone] = None
+        self._step_map: Dict[str, Tuple[Step, str]] = {}
 
         # background canvas
         self.bg = tk.Canvas(root, bg=BG_BASE, highlightthickness=0)
@@ -214,18 +270,62 @@ class ForensicApp:
 
         self.run_btn = tk.Button(top_row, text="Run Selected Step", command=self._run_selected_step,
                                  bg=TEXT_MAIN, fg=BG_DARK, activebackground=ACCENT, activeforeground=BG_DARK,
-                                 relief="flat", padx=10, pady=6, font=FONT_SECTION)
+                                 relief="flat", padx=10, pady=6, font=FONT_SECTION, state="disabled")
         self.run_btn.pack(side="right", padx=(6, 0))
 
-        self.steps_tree = ttk.Treeview(steps_card, columns=("step", "description", "script"), show="headings",
-                                       selectmode="browse", height=10)
+        filter_row = tk.Frame(steps_card, bg=CARD_BG)
+        filter_row.pack(fill="x", pady=(6, 0))
+        tk.Label(filter_row, text="Operation", fg=TEXT_MAIN, bg=CARD_BG, font=FONT_BODY).pack(side="left")
+        self.op_filter = tk.StringVar(value=OP_ALL)
+        for op in OP_FILTERS:
+            label = "All" if op == OP_ALL else op
+            tk.Radiobutton(
+                filter_row,
+                text=label,
+                variable=self.op_filter,
+                value=op,
+                command=self._on_filter_change,
+                bg=CARD_BG,
+                fg=TEXT_MAIN,
+                selectcolor=CARD_BG,
+                activebackground=CARD_BG,
+                activeforeground=TEXT_MAIN,
+                font=FONT_BODY,
+            ).pack(side="left", padx=(8, 0))
+
+        self.policy_label = tk.Label(
+            steps_card,
+            text="",
+            fg=TEXT_MAIN,
+            bg=CARD_BG,
+            font=FONT_BODY,
+            justify="left",
+            wraplength=820,
+        )
+        self.policy_label.pack(anchor="w", pady=(4, 0))
+
+        self.step_hint = tk.Label(steps_card, text="", fg=TEXT_MAIN, bg=CARD_BG, font=FONT_BODY)
+        self.step_hint.pack(anchor="w", pady=(2, 6))
+
+        self.steps_tree = ttk.Treeview(
+            steps_card,
+            columns=("operation", "step", "description", "script", "status"),
+            show="headings",
+            selectmode="browse",
+            height=10,
+        )
+        self.steps_tree.heading("operation", text="Op")
         self.steps_tree.heading("step", text="Step")
         self.steps_tree.heading("description", text="Description")
         self.steps_tree.heading("script", text="Script")
-        self.steps_tree.column("step", width=130, anchor="w")
-        self.steps_tree.column("description", width=360, anchor="w")
-        self.steps_tree.column("script", width=420, anchor="w")
-        self.steps_tree.pack(fill="x", expand=False, pady=(8, 8))
+        self.steps_tree.heading("status", text="Status")
+        self.steps_tree.column("operation", width=90, anchor="w")
+        self.steps_tree.column("step", width=150, anchor="w")
+        self.steps_tree.column("description", width=300, anchor="w")
+        self.steps_tree.column("script", width=300, anchor="w")
+        self.steps_tree.column("status", width=90, anchor="w")
+        self.steps_tree.pack(fill="x", expand=False, pady=(4, 8))
+        self.steps_tree.bind("<<TreeviewSelect>>", self._on_step_selected)
 
         style = ttk.Style()
         style.theme_use("default")
@@ -264,28 +364,137 @@ class ForensicApp:
         if self.config.milestones:
             self.milestone_list.selection_set(0)
             self._on_select_milestone()
+        else:
+            self._current_milestone = None
+            self._rebuild_steps()
 
     def _on_select_milestone(self, event=None) -> None:
-        for item in self.steps_tree.get_children():
-            self.steps_tree.delete(item)
         selection = self.milestone_list.curselection()
         if not selection:
+            self._current_milestone = None
+            self._rebuild_steps()
             return
         name = self.milestone_list.get(selection[0])
         ms = self.config.milestones.get(name)
         if not ms:
+            self._current_milestone = None
+            self._rebuild_steps()
             return
+        self._current_milestone = ms
+        self._rebuild_steps()
+
+    def _on_filter_change(self) -> None:
+        self._rebuild_steps()
+
+    def _rebuild_steps(self) -> None:
+        for item in self.steps_tree.get_children():
+            self.steps_tree.delete(item)
+        self._step_map.clear()
+
+        ms = self._current_milestone
+        if not ms:
+            self.policy_label.config(text="")
+            self.step_hint.config(text="")
+            self.run_btn.config(state="disabled")
+            return
+
+        op_filter = self.op_filter.get()
         for step in ms.steps:
+            op = self._get_step_operation(step)
+            if op_filter != OP_ALL and op != op_filter:
+                continue
             script = step.script_path or "<not set>"
-            self.steps_tree.insert("", tk.END, values=(step.name, step.description, script))
-        # auto select first step
+            status = self._step_status(ms, step, op)
+            item = self.steps_tree.insert("", tk.END, values=(op, step.name, step.description, script, status))
+            self._step_map[item] = (step, op)
+
+        self._update_policy_label(ms)
+
         children = self.steps_tree.get_children()
         if children:
             self.steps_tree.selection_set(children[0])
+        self._update_run_state()
+
+    def _update_policy_label(self, ms: Milestone) -> None:
+        expected = {OP_INSERT, OP_VALIDATE} if ms.external_collect else set(OP_DISPLAY)
+        present = []
+        unset_count = 0
+        for step in ms.steps:
+            op = self._get_step_operation(step)
+            if op == OP_UNKNOWN:
+                unset_count += 1
+            elif op not in present:
+                present.append(op)
+
+        ordered_present = [op for op in OP_DISPLAY if op in present]
+        missing = [op for op in OP_DISPLAY if op in expected and op not in present]
+        extra = [op for op in present if op not in expected]
+        policy = "External collect (INSERT + VALIDATE only)" if ms.external_collect else "Standard (INIT + EXTRACT + VALIDATE + INSERT)"
+        text = f"Policy: {policy}. Present: {', '.join(ordered_present) or 'none'}."
+        if missing:
+            text += f" Missing: {', '.join(missing)}."
+        if extra:
+            text += f" Extra: {', '.join(extra)}."
+        if unset_count:
+            text += f" Unset: {unset_count}."
+        text += " INIT runs once per step (tracked in forensic_state.json)."
+        self.policy_label.config(text=text)
+
+    def _get_step_operation(self, step: Step) -> str:
+        explicit = normalize_operation(step.operation)
+        return explicit if explicit else infer_operation(step)
+
+    def _step_status(self, ms: Milestone, step: Step, op: str) -> str:
+        if op == OP_INIT and self._init_locked(ms, step):
+            return "DONE"
+        if ms.external_collect and op in (OP_INIT, OP_EXTRACT):
+            return "BLOCKED"
+        if op == OP_UNKNOWN:
+            return "UNSET"
+        return ""
+
+    def _on_step_selected(self, event=None) -> None:
+        self._update_run_state()
+
+    def _update_run_state(self) -> None:
+        ms = self._current_milestone
+        if not ms:
+            self.run_btn.config(state="disabled")
+            self.step_hint.config(text="")
+            return
+
+        item = self.steps_tree.selection()
+        if not item:
+            self.run_btn.config(state="disabled")
+            self.step_hint.config(text="")
+            return
+
+        step, op = self._step_map.get(item[0], (None, None))
+        if not step or not op:
+            self.run_btn.config(state="disabled")
+            self.step_hint.config(text="")
+            return
+
+        allowed, hint = self._can_run_step(ms, step, op)
+        self.run_btn.config(state="normal" if allowed else "disabled")
+        self.step_hint.config(text=hint or "")
+
+    def _can_run_step(self, ms: Milestone, step: Step, op: str) -> Tuple[bool, str]:
+        script = step.script_path or ""
+        if not script or script == "<not set>" or script.lower() == "pending":
+            return False, "No script set for this step."
+        if ms.external_collect and op in (OP_INIT, OP_EXTRACT):
+            return False, "External collect milestones allow only INSERT and VALIDATE."
+        if op == OP_INIT and self._init_locked(ms, step):
+            return False, "INIT already completed (locked)."
+        if op == OP_UNKNOWN:
+            return True, "Operation UNSET; consider setting operation in config."
+        return True, ""
 
     def _refresh(self) -> None:
         try:
             self.config = ForensicConfig.load()
+            self.state = ForensicState.load()
             self._populate_globals()
             self._populate_milestones()
             messagebox.showinfo("Refresh", "Configuration reloaded.")
@@ -297,6 +506,15 @@ class ForensicApp:
         self.output.see("end")
         self.output.update_idletasks()
 
+    def _init_locked(self, ms: Milestone, step: Step) -> bool:
+        ms_runs = self.state.init_runs.get(ms.name, {})
+        return step_key(step) in ms_runs
+
+    def _mark_init_done(self, ms: Milestone, step: Step) -> None:
+        ms_runs = self.state.init_runs.setdefault(ms.name, {})
+        ms_runs[step_key(step)] = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        self.state.save()
+
     def _run_selected_step(self) -> None:
         ms_name = None
         sel = self.milestone_list.curselection()
@@ -306,19 +524,40 @@ class ForensicApp:
             messagebox.showwarning("No milestone", "Select a milestone first.")
             return
 
+        ms = self.config.milestones.get(ms_name)
+        if not ms:
+            messagebox.showerror("Missing milestone", f"Milestone not found: {ms_name}")
+            return
+
         item = self.steps_tree.selection()
         if not item:
             messagebox.showwarning("No step", "Select a step first.")
             return
 
-        values = self.steps_tree.item(item[0], "values")
-        step_name, desc, script = values
+        step_entry = self._step_map.get(item[0])
+        if not step_entry:
+            messagebox.showerror("Missing step", "Could not resolve selected step.")
+            return
+        step, op = step_entry
+        step_name = step.name
+        desc = step.description
+        script = step.script_path or "<not set>"
         if not script or script == "<not set>" or script.lower() == "pending":
             messagebox.showwarning("No script", "This step has no script_path set.")
+            return
+        if ms.external_collect and op in (OP_INIT, OP_EXTRACT):
+            messagebox.showwarning(
+                "Blocked",
+                "External collect milestones allow only INSERT and VALIDATE steps.",
+            )
+            return
+        if op == OP_INIT and self._init_locked(ms, step):
+            messagebox.showwarning("Blocked", "INIT already completed for this step.")
             return
 
         self._append_output(f"\n=== RUN: {ms_name} :: {step_name} ===")
         self._append_output(f"{desc}")
+        self._append_output(f"Operation: {op}")
         self._append_output(f"Script: {script}")
 
         g = self.config.globals
@@ -334,12 +573,20 @@ class ForensicApp:
         if ext == ".sql":
             rc, out = self._run_sql(resolved)
         elif ext == ".py":
-            rc, out = self._run_python(resolved)
+            extra_args = self._python_extra_args(ms, resolved)
+            if extra_args is None:
+                self._append_output("Canceled by user.")
+                return
+            rc, out = self._run_python(resolved, extra_args=extra_args)
         else:
             rc, out = 1, f"Unsupported script type: {ext}"
 
         self._append_output(out)
         self._append_output(f"=== EXIT CODE: {rc} ===")
+
+        if rc == 0 and op == OP_INIT:
+            self._mark_init_done(ms, step)
+            self._rebuild_steps()
 
         if rc != 0:
             messagebox.showerror("Step failed", f"{ms_name} :: {step_name} failed.\nExit code: {rc}")
@@ -382,7 +629,7 @@ class ForensicApp:
         except Exception as e:
             return 1, f"Exception running mysql: {e}"
 
-    def _run_python(self, py_path: Path) -> Tuple[int, str]:
+    def _run_python(self, py_path: Path, extra_args: Optional[List[str]] = None) -> Tuple[int, str]:
         g = self.config.globals
         py = g.python_exe or sys.executable
 
@@ -393,15 +640,80 @@ class ForensicApp:
         env["SAFENET_CONFIG"] = str(CONFIG_FILE)
 
         cmd = [py, str(py_path)]
+        if extra_args:
+            cmd.extend(extra_args)
         rc, out = run_subprocess(cmd, cwd=py_path.parent, env=env)
         header = f"[python] {shlex.join(cmd)}"
         return rc, header + "\n" + out
+
+    def _python_extra_args(self, ms: Milestone, py_path: Path) -> Optional[List[str]]:
+        script_name = py_path.name
+        if script_name == "m02_windows_logs_03_probe_load_to_EVENTI_PC.py":
+            return self._prompt_m02_windows_loader_args(ms)
+        return []
+
+    def _prompt_m02_windows_loader_args(self, ms: Milestone) -> Optional[List[str]]:
+        g = self.config.globals
+        dataset_root = ms.folder
+        if not dataset_root and g.workspace_folder:
+            dataset_root = str(Path(g.workspace_folder) / "DataSetGlobal" / "windows_logs")
+
+        if not dataset_root or not Path(dataset_root).is_dir():
+            dataset_root = simpledialog.askstring(
+                "Dataset root",
+                "Dataset root (DataSetGlobal/windows_logs):",
+                initialvalue=dataset_root or "",
+                parent=self.root,
+            )
+            if not dataset_root:
+                return None
+
+        source_log = simpledialog.askstring(
+            "Source log",
+            "Source log (Security/System/Application/PowerShell/AMSI):",
+            initialvalue="Security",
+            parent=self.root,
+        )
+        if not source_log:
+            return None
+
+        limit_str = simpledialog.askstring(
+            "Limit per run",
+            "Limit per run (default 100):",
+            initialvalue="100",
+            parent=self.root,
+        )
+        try:
+            limit_val = int(limit_str) if limit_str else 100
+        except ValueError:
+            limit_val = 100
+
+        dry_run = messagebox.askyesno(
+            "Dry run",
+            "Run in dry-run mode (no DB writes)?",
+            parent=self.root,
+        )
+
+        args: List[str] = [
+            "--dataset-root", dataset_root,
+            "--mysql-host", g.mysql_host,
+            "--mysql-port", str(g.mysql_port),
+            "--mysql-user", g.mysql_user,
+            "--mysql-database", g.mysql_database,
+            "--source-log", source_log,
+            "--limit-per-run", str(limit_val),
+        ]
+        if g.mysql_password:
+            args.extend(["--mysql-password", g.mysql_password])
+        if dry_run:
+            args.append("--dry-run")
+        return args
 
     def _open_settings(self) -> None:
         win = tk.Toplevel(self.root)
         win.title("Settings")
         win.configure(bg=BG_BASE)
-        win.geometry("620x620")
+        win.geometry("620x700")
         win.grab_set()
 
         section_title = lambda text: tk.Label(win, text=text, fg=TEXT_MAIN, bg=BG_BASE, font=FONT_SECTION)
@@ -417,6 +729,24 @@ class ForensicApp:
                 entry.config(show="*")
             entry.pack(side="left", fill="x", expand=True, padx=(6, 0))
             return entry
+
+        def add_check(parent, label, value, check_text="External collect"):
+            row = tk.Frame(parent, bg=BG_BASE, pady=4)
+            row.pack(fill="x")
+            tk.Label(row, text=label, fg=TEXT_MAIN, bg=BG_BASE, width=20, anchor="w", font=FONT_BODY).pack(side="left")
+            var = tk.BooleanVar(value=value)
+            tk.Checkbutton(
+                row,
+                text=check_text,
+                variable=var,
+                bg=BG_BASE,
+                fg=TEXT_MAIN,
+                selectcolor=BG_BASE,
+                activebackground=BG_BASE,
+                activeforeground=TEXT_MAIN,
+                font=FONT_BODY,
+            ).pack(side="left", padx=(6, 0))
+            return var
 
         g = self.config.globals
 
@@ -451,6 +781,19 @@ class ForensicApp:
         for name, ms in sorted(self.config.milestones.items()):
             milestone_entries[name] = add_field(ms_frame, name, ms.folder or "")
 
+        section_title("Milestone policy").pack(anchor="w", pady=(14, 2))
+        tk.Label(
+            win,
+            text="External collect milestones allow only INSERT and VALIDATE.",
+            fg=TEXT_MAIN,
+            bg=BG_BASE,
+            font=FONT_BODY,
+        ).pack(anchor="w", padx=8)
+        policy_frame = tk.Frame(win, bg=BG_BASE); policy_frame.pack(fill="x", padx=8)
+        milestone_policy: Dict[str, tk.BooleanVar] = {}
+        for name, ms in sorted(self.config.milestones.items()):
+            milestone_policy[name] = add_check(policy_frame, name, ms.external_collect)
+
         btn_row = tk.Frame(win, bg=BG_BASE, pady=14); btn_row.pack(fill="x")
 
         def on_save():
@@ -473,6 +816,11 @@ class ForensicApp:
                 val = entry.get().strip()
                 if name in self.config.milestones:
                     self.config.milestones[name].folder = val or None
+
+            # milestone policy
+            for name, var in milestone_policy.items():
+                if name in self.config.milestones:
+                    self.config.milestones[name].external_collect = bool(var.get())
 
             try:
                 self.config.save()
@@ -497,3 +845,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

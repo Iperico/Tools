@@ -1,0 +1,7 @@
+{
+    "init_runs": {
+        "M02 - Windows Logs": {
+            "m02_windows_logs_01_init.sql": "2025-12-23T12:28:13Z"
+        }
+    }
+}

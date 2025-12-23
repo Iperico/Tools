@@ -1,24 +1,23 @@
 #!/usr/bin/env python
 # m02_windows_logs_03_probe_load_to_EVENTI_PC.py
 #
-# Probe Windows logs normalizzati in SAFENET e push in EVENTI_PC.
+# Probe Windows logs normalized in SAFENET and push into EVENTI_PC (MySQL).
 #
-# v4:
-#   - lavora su:
-#       C:\SAFENET\DataSetGlobal\windows_logs\<device_label>\<tool_tag>\<run_id>\LOGS\<source_log>\
-#   - prende SOLO il CSV principale:
-#       <source_log>.csv      (es. Security.csv)
-#       o <source_log>_events.csv
-#   - legge il CSV con encoding "utf-8-sig" (fix BOM)
-#   - usa parse_event_time() di m02_windows_logs_01_log_dump.py
-#     ma se il parse fallisce, tiene il timestamp grezzo come stringa
-#   - inserisce in EVENTI_PC (timestamp_utc = stringa, device_id, source_log, event_code, description)
+# v5:
+#   - MySQL connector (mysql-connector-python)
+#   - reads CSV in utf-8-sig (BOM-safe)
+#   - uses parse_event_time from m02_windows_logs_01_log_dump.py
+#   - inserts into EVENTI_PC with basic fields
 #
-# Uso tipico:
+# Usage:
 #
 #   python.exe m02_windows_logs_03_probe_load_to_EVENTI_PC.py ^
-#       --dataset-root "C:\SAFENET\DataSetGlobal\windows_logs" ^
-#       --db "C:\SAFENET\DB\forensic.db" ^
+#       --dataset-root "C:\\SAFENET\\DataSetGlobal\\windows_logs" ^
+#       --mysql-host "127.0.0.1" ^
+#       --mysql-port 3306 ^
+#       --mysql-user "safenet_ingest" ^
+#       --mysql-password "..." ^
+#       --mysql-database "forensic" ^
 #       --source-log "Security" ^
 #       --device-label "PICCIRILLA_AleNew" ^
 #       --event-code 4624 ^
@@ -28,12 +27,20 @@
 
 import argparse
 import csv
-import sqlite3
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
+try:
+    import mysql.connector
+    from mysql.connector import Error as MySQLError
+except Exception as e:
+    raise SystemExit(
+        "Missing mysql-connector-python. Install with: pip install mysql-connector-python\n"
+        f"Details: {e}"
+    )
+
 # ---------------------------------------------------------------------------
-# Import dalle utility del modulo M02_01 (il tuo log dumper Windows)
+# Import from M02_01 utility (Windows log dumper)
 # ---------------------------------------------------------------------------
 
 try:
@@ -50,9 +57,9 @@ except Exception as e:
 # Helper DB
 # ---------------------------------------------------------------------------
 
-def load_device_map(conn: sqlite3.Connection) -> Dict[str, int]:
+def load_device_map(conn) -> Dict[str, int]:
     """
-    device_label -> device_id da DEVICE_MASTER.
+    device_label -> device_id from DEVICE_MASTER.
     """
     cur = conn.cursor()
     cur.execute("SELECT device_id, device_label FROM DEVICE_MASTER")
@@ -60,11 +67,40 @@ def load_device_map(conn: sqlite3.Connection) -> Dict[str, int]:
     for device_id, label in cur.fetchall():
         if label:
             mapping[str(label)] = int(device_id)
+    cur.close()
     return mapping
 
 
+def ensure_device_id(conn, device_label: str) -> Optional[int]:
+    """
+    Ensure a device exists in DEVICE_MASTER and return its device_id.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT device_id FROM DEVICE_MASTER WHERE device_label = %s",
+        (device_label,),
+    )
+    row = cur.fetchone()
+    if row:
+        device_id = int(row[0])
+        cur.close()
+        return device_id
+
+    cur.execute(
+        """
+        INSERT INTO DEVICE_MASTER (device_label, device_type, platform)
+        VALUES (%s, %s, %s)
+        """,
+        (device_label, "PC", "Windows"),
+    )
+    conn.commit()
+    device_id = int(cur.lastrowid) if cur.lastrowid else None
+    cur.close()
+    return device_id
+
+
 # ---------------------------------------------------------------------------
-# Iterazione sulle cartelle SAFENET
+# Iteration on SAFENET folders
 # ---------------------------------------------------------------------------
 
 def iter_main_log_csv_files(
@@ -73,17 +109,17 @@ def iter_main_log_csv_files(
     device_label_filter: Optional[str] = None,
 ) -> Iterable[Tuple[str, str, str, Path]]:
     """
-    Scorre:
+    Scan:
 
         <dataset_root>/<device_label>/<tool_tag>/<run_id>/LOGS/<source_log>/
 
-    e restituisce tuple:
+    and return tuples:
 
         (device_label, tool_tag, run_id, csv_path)
 
-    prendendo SOLO:
+    taking ONLY:
         <source_log>.csv
-        oppure <source_log>_events.csv
+        or <source_log>_events.csv
     """
     src_norm = source_log.strip()
 
@@ -121,20 +157,19 @@ def iter_main_log_csv_files(
 
 
 # ---------------------------------------------------------------------------
-# Lettura CSV (fix BOM) + estrazione campi
+# CSV read (BOM-safe) + extract fields
 # ---------------------------------------------------------------------------
 
 def event_rows_from_file(csv_path: Path) -> List[dict]:
     """
-    Legge un CSV di eventi (UTF-8 con BOM) e restituisce una lista di dict.
-    Non fa filtri temporali qui; li gestiamo eventualmente a livello DB in seguito.
+    Read a CSV (UTF-8 with BOM) and return a list of dict rows.
     """
     if csv_path.suffix.lower() != ".csv":
-        print(f"  [INFO] Salto file non-CSV in questo probe: {csv_path}")
+        print(f"  [INFO] Skip non-CSV file in this probe: {csv_path}")
         return []
 
     events: List[dict] = []
-    # 'utf-8-sig' mangia il BOM iniziale → header "TimeCreated" diventa corretto
+    # 'utf-8-sig' strips BOM so header "TimeCreated" is correct
     with csv_path.open("r", encoding="utf-8-sig", errors="replace") as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -144,12 +179,12 @@ def event_rows_from_file(csv_path: Path) -> List[dict]:
 
 def extract_basic_fields(row: dict) -> Tuple[Optional[str], Optional[int], str]:
     """
-    Estrae:
-      - timestamp_utc_str (o stringa grezza se il parse fallisce)
-      - event_code (int, se possibile)
+    Extract:
+      - timestamp_utc_str (or raw string if parse fails)
+      - event_code (int, if possible)
       - description (Message/Description)
     """
-    # Timestamp: varianti possibili
+    # Timestamp: common variants
     ts_value = (
         row.get("TimeCreated")
         or row.get("timeCreated")
@@ -165,7 +200,7 @@ def extract_basic_fields(row: dict) -> Tuple[Optional[str], Optional[int], str]:
         if dt_obj is not None:
             ts_utc_str = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
         else:
-            # Parse fallito → usiamo la stringa grezza (locale)
+            # Parse failed: keep raw string
             ts_utc_str = ts_value
     else:
         ts_utc_str = None
@@ -183,7 +218,7 @@ def extract_basic_fields(row: dict) -> Tuple[Optional[str], Optional[int], str]:
     except Exception:
         event_code = None
 
-    # Descrizione
+    # Description
     desc = (
         row.get("Message")
         or row.get("Description")
@@ -196,6 +231,24 @@ def extract_basic_fields(row: dict) -> Tuple[Optional[str], Optional[int], str]:
     return ts_utc_str, event_code, desc
 
 
+def open_mysql_connection(args):
+    kwargs = {
+        "host": args.mysql_host,
+        "port": args.mysql_port,
+        "user": args.mysql_user,
+        "database": args.mysql_database,
+        "use_pure": True,
+    }
+    if args.mysql_password:
+        kwargs["password"] = args.mysql_password
+    try:
+        conn = mysql.connector.connect(**kwargs)
+    except MySQLError as e:
+        raise SystemExit(f"MySQL connection failed: {e}")
+    conn.autocommit = False
+    return conn
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -203,60 +256,77 @@ def extract_basic_fields(row: dict) -> Tuple[Optional[str], Optional[int], str]:
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=(
-            "M02 Windows logs – probe: porta eventi da LOGS/<source_log> in EVENTI_PC "
-            "(timestamp grezzo + EventID + Message)."
+            "M02 Windows logs probe: move events from LOGS/<source_log> into EVENTI_PC "
+            "(timestamp + EventID + Message) using MySQL."
         )
     )
     ap.add_argument(
         "--dataset-root",
         required=True,
-        help="Root DataSetGlobal per windows_logs (es. C:\\SAFENET\\DataSetGlobal\\windows_logs).",
+        help="Root DataSetGlobal for windows_logs (ex. C:\\SAFENET\\DataSetGlobal\\windows_logs).",
     )
     ap.add_argument(
-        "--db",
-        required=True,
-        help="Percorso DB SQLite forense (es. C:\\SAFENET\\DB\\forensic.db).",
+        "--mysql-host",
+        default="127.0.0.1",
+        help="MySQL host (default 127.0.0.1).",
+    )
+    ap.add_argument(
+        "--mysql-port",
+        type=int,
+        default=3306,
+        help="MySQL port (default 3306).",
+    )
+    ap.add_argument(
+        "--mysql-user",
+        default="safenet_ingest",
+        help="MySQL user (default safenet_ingest).",
+    )
+    ap.add_argument(
+        "--mysql-password",
+        help="MySQL password (optional).",
+    )
+    ap.add_argument(
+        "--mysql-database",
+        default="forensic",
+        help="MySQL database name (default forensic).",
     )
     ap.add_argument(
         "--source-log",
         required=True,
-        help="Nome log sorgente (Security, System, Application, PowerShell, AMSI...).",
+        help="Source log name (Security, System, Application, PowerShell, AMSI...).",
     )
     ap.add_argument(
         "--device-label",
-        help="Filtra su uno specifico device_label (come in DEVICE_MASTER.device_label).",
+        help="Filter by device_label (as in DEVICE_MASTER.device_label).",
     )
     ap.add_argument(
         "--event-code",
         type=int,
-        help="Filtra su un EventID specifico (4624, 4625, 7045, ...).",
+        help="Filter by EventID (4624, 4625, 7045, ...).",
     )
     ap.add_argument(
         "--limit-per-run",
         type=int,
         default=100,
-        help="Limite max eventi da inserire per ogni CSV (default 100).",
+        help="Max events to insert per CSV (default 100).",
     )
     ap.add_argument(
         "--dry-run",
         action="store_true",
-        help="Se impostato, NON inserisce nel DB, ma stampa cosa farebbe.",
+        help="If set, does not insert into DB, prints what it would do.",
     )
 
     args = ap.parse_args()
 
     dataset_root = Path(args.dataset_root)
     if not dataset_root.is_dir():
-        raise SystemExit(f"dataset-root non valida: {dataset_root}")
+        raise SystemExit(f"dataset-root not valid: {dataset_root}")
 
-    conn = sqlite3.connect(args.db)
-    conn.row_factory = sqlite3.Row
+    conn = open_mysql_connection(args)
 
     device_map = load_device_map(conn)
     if not device_map:
-        print("[WARN] Nessun device in DEVICE_MASTER, impossibile proseguire.")
-        conn.close()
-        return
+        print("[WARN] No devices in DEVICE_MASTER, will create as needed.")
 
     print(f"[INFO] Device map: {device_map}")
     print(f"[INFO] Source log: {args.source_log}")
@@ -280,12 +350,16 @@ def main() -> None:
 
         device_id = device_map.get(device_label)
         if device_id is None:
-            print(f"  [WARN] Nessun device_id per '{device_label}', salto.")
-            continue
+            device_id = ensure_device_id(conn, device_label)
+            if device_id is None:
+                print(f"  [WARN] Failed to create device for '{device_label}', skip.")
+                continue
+            device_map[device_label] = device_id
+            print(f"  [INFO] Created device '{device_label}' -> device_id={device_id}")
 
         rows = event_rows_from_file(csv_file)
         if not rows:
-            print("  [INFO] Nessun evento (o file vuoto/non supportato), salto.")
+            print("  [INFO] No events (or file empty/non supported), skip.")
             continue
 
         inserted_for_file = 0
@@ -295,11 +369,11 @@ def main() -> None:
             ts_utc_str, event_code, desc = extract_basic_fields(row)
             total_seen += 1
 
-            # filtro per EventID
+            # filter EventID
             if args.event_code is not None and event_code != args.event_code:
                 continue
 
-            # serve almeno qualcosa nel timestamp
+            # need a timestamp
             if ts_utc_str is None:
                 continue
 
@@ -308,36 +382,40 @@ def main() -> None:
 
             if args.dry_run:
                 print(
-                    f"  [DRY] Inserirei EVENTI_PC: ts={ts_utc_str}, "
+                    f"  [DRY] Would insert EVENTI_PC: ts={ts_utc_str}, "
                     f"device_id={device_id}, source_log={args.source_log}, "
                     f"event_code={event_code}"
                 )
             else:
-                cur.execute(
-                    """
-                    INSERT INTO EVENTI_PC (
-                        timestamp_utc,
-                        device_id,
-                        source_log,
-                        event_code,
-                        account_id,
-                        ip_remoto,
-                        logon_type,
-                        process_name,
-                        command_line,
-                        description,
-                        sospetto_flag,
-                        motivazione_sospetto
-                    ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, 0, NULL)
-                    """,
-                    (
-                        ts_utc_str,
-                        device_id,
-                        args.source_log,
-                        event_code,
-                        desc,
-                    ),
-                )
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO EVENTI_PC (
+                            timestamp_utc,
+                            device_id,
+                            source_log,
+                            event_code,
+                            account_id,
+                            ip_remoto,
+                            logon_type,
+                            process_name,
+                            command_line,
+                            description,
+                            sospetto_flag,
+                            motivazione_sospetto
+                        ) VALUES (%s, %s, %s, %s, NULL, NULL, NULL, NULL, NULL, %s, 0, NULL)
+                        """,
+                        (
+                            ts_utc_str,
+                            device_id,
+                            args.source_log,
+                            event_code,
+                            desc,
+                        ),
+                    )
+                except MySQLError as e:
+                    print(f"  [WARN] Insert failed: {e}")
+                    continue
 
             inserted_for_file += 1
             total_inserted += 1
@@ -345,15 +423,16 @@ def main() -> None:
         if not args.dry_run:
             conn.commit()
 
-        print(f"  [INFO] Eventi inseriti per questo file: {inserted_for_file}")
+        cur.close()
+        print(f"  [INFO] Events inserted for this file: {inserted_for_file}")
 
     conn.close()
 
     print("\n[SUMMARY]")
-    print(f"  Eventi visti (tutti i file): {total_seen}")
-    print(f"  Eventi inseriti (dopo filtri/limiti): {total_inserted}")
+    print(f"  Events seen (all files): {total_seen}")
+    print(f"  Events inserted (after filters/limits): {total_inserted}")
     if args.dry_run:
-        print("  Modalità DRY-RUN: nessuna modifica reale al DB.")
+        print("  DRY-RUN mode: no changes made to DB.")
 
 
 if __name__ == "__main__":
