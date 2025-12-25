@@ -2,6 +2,21 @@
     "init_runs": {
         "M02 - Windows Logs": {
             "m02_windows_logs_01_init.sql": "2025-12-23T12:28:13Z"
+        },
+        "Stage 0 - Bootstrap": {
+            "mysql_forensic_init_optimized.sql": "2025-12-23T13:42:33Z"
+        },
+        "M1 - Windows Logs (fast)": {
+            "Milestones/M1_Windows_Logs/m1_windows_logs_01_init.mysql.sql": "2025-12-24T16:45:06Z"
+        }
+    },
+    "init_milestones": {
+        "Stage 0 - Bootstrap": "2025-12-23T13:42:33Z",
+        "M1 - Windows Logs (fast)": "2025-12-24T16:45:06Z"
+    },
+    "last_runs": {
+        "M1 - Windows Logs (fast)": {
+            "Milestones/M1_Windows_Logs/m1_windows_logs_batch_runner.py": "2025-12-25T12:35:47Z"
         }
     }
 }

@@ -7,7 +7,7 @@
 #   - MySQL connector (mysql-connector-python)
 #   - reads CSV in utf-8-sig (BOM-safe)
 #   - uses parse_event_time from m02_windows_logs_01_log_dump.py
-#   - inserts into EVENTI_PC with basic fields
+#   - inserts into EVENTI_PC and mirrors raw rows into EVENTI_RAW (json)
 #
 # Usage:
 #
@@ -27,6 +27,7 @@
 
 import argparse
 import csv
+import json
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -231,6 +232,45 @@ def extract_basic_fields(row: dict) -> Tuple[Optional[str], Optional[int], str]:
     return ts_utc_str, event_code, desc
 
 
+def extract_event_type(row: dict) -> Optional[str]:
+    value = (
+        row.get("ProviderName")
+        or row.get("Source")
+        or row.get("Provider")
+        or ""
+    )
+    value = str(value).strip()
+    return value or None
+
+
+def lookup_windows_acquisition_id(conn, device_id: int, run_id: str, source_log: str, tool_tag: str) -> Optional[int]:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT windows_acquisition_id
+            FROM WINDOWS_ACQUISITIONS
+            WHERE device_id = %s AND run_id = %s AND log_type = %s AND tool_name = %s
+            """,
+            (device_id, run_id, source_log, tool_tag),
+        )
+        row = cur.fetchone()
+        if row:
+            return int(row[0])
+        return None
+    finally:
+        cur.close()
+
+
+def eventi_raw_available(conn) -> bool:
+    cur = conn.cursor()
+    try:
+        cur.execute("SHOW TABLES LIKE 'EVENTI_RAW'")
+        return cur.fetchone() is not None
+    finally:
+        cur.close()
+
+
 def open_mysql_connection(args):
     kwargs = {
         "host": args.mysql_host,
@@ -318,6 +358,7 @@ def main() -> None:
 
     args = ap.parse_args()
 
+    raw_milestone = "M02"
     dataset_root = Path(args.dataset_root)
     if not dataset_root.is_dir():
         raise SystemExit(f"dataset-root not valid: {dataset_root}")
@@ -328,6 +369,10 @@ def main() -> None:
     if not device_map:
         print("[WARN] No devices in DEVICE_MASTER, will create as needed.")
 
+    raw_enabled = eventi_raw_available(conn)
+    if not raw_enabled:
+        print("[WARN] EVENTI_RAW table not found. Raw mirror will be skipped.")
+
     print(f"[INFO] Device map: {device_map}")
     print(f"[INFO] Source log: {args.source_log}")
     if args.event_code is not None:
@@ -337,6 +382,7 @@ def main() -> None:
 
     total_seen = 0
     total_inserted = 0
+    windows_acq_lookup_failed = False
 
     for device_label, tool_tag, run_id, csv_file in iter_main_log_csv_files(
         dataset_root=dataset_root,
@@ -356,6 +402,20 @@ def main() -> None:
                 continue
             device_map[device_label] = device_id
             print(f"  [INFO] Created device '{device_label}' -> device_id={device_id}")
+
+        windows_acquisition_id = None
+        if not windows_acq_lookup_failed:
+            try:
+                windows_acquisition_id = lookup_windows_acquisition_id(
+                    conn=conn,
+                    device_id=device_id,
+                    run_id=run_id,
+                    source_log=args.source_log,
+                    tool_tag=tool_tag,
+                )
+            except MySQLError as e:
+                windows_acq_lookup_failed = True
+                print(f"  [WARN] WINDOWS_ACQUISITIONS lookup failed: {e}")
 
         rows = event_rows_from_file(csv_file)
         if not rows:
@@ -413,6 +473,38 @@ def main() -> None:
                             desc,
                         ),
                     )
+                    if raw_enabled:
+                        raw_payload = json.dumps(row, ensure_ascii=False)
+                        cur.execute(
+                            """
+                            INSERT INTO EVENTI_RAW (
+                                milestone_code,
+                                device_id,
+                                account_id,
+                                windows_acquisition_id,
+                                source_log,
+                                event_time_utc,
+                                event_code,
+                                event_type,
+                                raw_format,
+                                raw_payload,
+                                source_path
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                raw_milestone,
+                                device_id,
+                                None,
+                                windows_acquisition_id,
+                                args.source_log,
+                                ts_utc_str,
+                                event_code,
+                                extract_event_type(row),
+                                "json",
+                                raw_payload,
+                                str(csv_file),
+                            ),
+                        )
                 except MySQLError as e:
                     print(f"  [WARN] Insert failed: {e}")
                     continue

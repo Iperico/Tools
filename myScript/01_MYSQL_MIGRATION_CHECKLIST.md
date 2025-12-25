@@ -81,8 +81,17 @@ SELECT * FROM SCHEMA_VERSION;
 
 ## 3) Milestone tables (M01 + M02) in MySQL
 
-### 3A. Applica M01 (Android)
-Userai la versione MySQL dell’init:
+### 3A. Shared raw events (common)
+Userai:
+- `m00_eventi_raw.mysql.sql`
+
+Esecuzione:
+```powershell
+.\mysql.exe -u safenet_admin -p forensic < C:\SAFENET\Tools\myScript\m00_eventi_raw.mysql.sql
+```
+
+### 3B. Applica M01 (Android)
+Userai la versione MySQL dell'init:
 - `m01_android_adb_01_init.mysql.sql`
 
 Esecuzione:
@@ -90,7 +99,7 @@ Esecuzione:
 .\mysql.exe -u safenet_admin -p forensic < C:\SAFENET\Tools\m01_android_adb_01_init.mysql.sql
 ```
 
-### 3B. Applica M02 (Windows)
+### 3C. Applica M02 (Windows)
 Userai:
 - `m02_windows_logs_01_init.mysql.sql`
 
@@ -191,4 +200,3 @@ Questo ti permette di:
 
 ## Nota “umano-legale” (1 riga, ma pesante)
 Questa pipeline serve a trasformare sensazioni in **evidenze verificabili** (chi, quando, cosa). Poi la strategia (HR/Legal/forensics esterna) la scegli con più controllo e meno ansia.
-

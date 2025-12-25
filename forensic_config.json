@@ -72,6 +72,30 @@
                     "script_path": "m02_windows_logs_04_build_event_type_pipelines_pre.py"
                 }
             ]
+        },
+        "M1 - Windows Logs (fast)": {
+            "name": "M1 - Windows Logs (fast)",
+            "folder": "C:\\SAFENET\\DataSetGlobal\\windows_logs",
+            "steps": [
+                {
+                    "name": "Init schema (M1 fast)",
+                    "description": "Create WIN_* tables (fast-search schema).",
+                    "script_path": "Milestones/M1_Windows_Logs/m1_windows_logs_01_init.mysql.sql",
+                    "operation": "INIT"
+                },
+                {
+                    "name": "Batch ingest (M1 fast)",
+                    "description": "Ingest all CSVs under LOGS/* into WIN_EVENT_CORE/WIN_EVENT_TEXT.",
+                    "script_path": "Milestones/M1_Windows_Logs/m1_windows_logs_batch_runner.py",
+                    "operation": "INSERT"
+                },
+                {
+                    "name": "Validate counts (M1 fast)",
+                    "description": "Compare CSV row counts to WIN_EVENT_CORE counts.",
+                    "script_path": "Milestones/M1_Windows_Logs/m1_windows_logs_validate_counts.py",
+                    "operation": "VALIDATE"
+                }
+            ]
         }
     }
 }

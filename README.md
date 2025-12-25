@@ -9,19 +9,22 @@ procedure standard per le milestone.
 - Bootstrap core separato dal DDL milestone:
   - Bootstrap: `mysql_forensic_init_optimized.sql` (oppure `myScript/mysql_forensic_init.sql`)
     crea DEVICE_MASTER, ACCOUNT_MASTER, SCHEMA_VERSION.
+  - Shared raw: `myScript/m00_eventi_raw.mysql.sql` crea EVENTI_RAW (lossless, comune).
   - Milestone DDL: `mXX_*_01_init.mysql.sql` (primario) e `.sql` legacy.
 - Ogni milestone produce ACQUISITIONS + EVENTI_* e usa DataSetGlobal
   come area normalizzata.
 
 ## Procedura standard per ogni milestone
 1. Bootstrap (una volta): eseguire lo script bootstrap MySQL.
-2. Init milestone: eseguire `mXX_*_01_init.mysql.sql`.
-3. Acquisizione: raccogliere i dati grezzi con lo strumento previsto.
-4. Extract to SAFENET: `mXX_*_02_extract_to_safenet.py` copia in DataSetGlobal
+2. Raw shared (una volta): eseguire `myScript/m00_eventi_raw.mysql.sql`.
+3. Init milestone: eseguire `mXX_*_01_init.mysql.sql`.
+4. Acquisizione: raccogliere i dati grezzi con lo strumento previsto.
+5. Extract to SAFENET: `mXX_*_02_extract_to_safenet.py` copia in DataSetGlobal
    e scrive `META/acquisition_meta.json`.
-5. Validate: `mXX_*_02b_validate_safenet.py` verifica coerenza sorgente vs SAFENET.
-6. Load: `mXX_*_03_probe_load_to_EVENTI_*.py` inserisce in EVENTI_* (supporto dry-run).
-7. Post-check (opzionale): `mXX_*_04_*` per coerenza, conteggi, coverage.
+6. Validate: `mXX_*_02b_validate_safenet.py` verifica coerenza sorgente vs SAFENET.
+7. Load: `mXX_*_03_probe_load_to_EVENTI_*.py` inserisce in EVENTI_* (supporto dry-run).
+8. Raw mirror: EVENTI_RAW popolato insieme al load (solo se insert OK).
+9. Post-check (opzionale): `mXX_*_04_*` per coerenza, conteggi, coverage.
 
 ## Contratto minimo (funzionalita standard)
 - Struttura dataset:
@@ -31,10 +34,37 @@ procedure standard per le milestone.
   tool_tag, percorsi e stato.
 - Loader usa mapping in DEVICE_MASTER/ACCOUNT_MASTER e registra device_id/account_id
   quando disponibili.
+- Loader MySQL inserisce anche in EVENTI_RAW (json lossless) dopo inserimento in EVENTI_*.
 - Flags minimi consigliati: `--dataset-root`, `--mysql-host`, `--mysql-port`,
   `--mysql-user`, `--mysql-password`, `--mysql-database`, `--dry-run`.
 
+## DB diagram (high-level)
+```text
+------------------------------+
+| DEVICE_MASTER ACCOUNT_MASTER|
+|        SCHEMA_VERSION       |
++--------------+--------------+
+               |
+       +-------+-------+
+       | ACQUISITIONS  |
+       +-------+-------+
+               |
+          +----+----+
+          | EVENTI_*|
+          +----+----+
+               |
+          +----+----+
+          | EVENTI_RAW |
+          +----+----+
+               |
+        TIMELINE_MASTER (planned)
+```
+Interactive diagram (hover for table info): `db_diagram_interactive.html`
+
 ## Milestone correnti
+- M1 Windows Logs (fast-search schema, new dev):
+  - DDL: `Milestones/M1_Windows_Logs/m1_windows_logs_01_init.mysql.sql`
+  - Doc: `Milestones/M1_Windows_Logs/README.md`
 - M01 Android ADB:
   - DDL: `m01_android_adb_01_init.sql`, `myScript/m01_android_adb_01_init.mysql.sql`
   - Seed device (opzionale): `m01_android_adb_01b_seed_DEVICE_MASTER.sql`
